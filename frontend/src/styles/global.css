@@ -1795,6 +1795,43 @@ select {
   margin-top: 4px;
 }
 
+.plan-config-grid {
+  margin: 10px 0 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.plan-config-item {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 183, 207, 0.26);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.plan-config-item span {
+  font-size: 0.82rem;
+  color: var(--subtle);
+  font-weight: 700;
+}
+
+.plan-config-item select,
+.plan-config-item input[type='range'] {
+  width: 100%;
+}
+
+.plan-config-item strong {
+  font-family: var(--display);
+  font-size: 1.2rem;
+}
+
+.plan-estimate-card small {
+  color: var(--subtle);
+  line-height: 1.4;
+}
+
 .week-plan-grid {
   display: grid;
   grid-auto-flow: column;
@@ -1815,6 +1852,11 @@ select {
 
 .week-plan-card h4 {
   margin: 8px 0 0;
+}
+
+.week-plan-card.rest-day {
+  border-style: dashed;
+  background: rgba(238, 247, 255, 0.78);
 }
 
 .overview-panel {
@@ -3481,6 +3523,10 @@ select {
   }
 
   .planner-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-config-grid {
     grid-template-columns: 1fr;
   }
 }
