@@ -1795,6 +1795,43 @@ select {
   margin-top: 4px;
 }
 
+.plan-config-grid {
+  margin: 10px 0 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.plan-config-item {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 183, 207, 0.26);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.plan-config-item span {
+  font-size: 0.82rem;
+  color: var(--subtle);
+  font-weight: 700;
+}
+
+.plan-config-item select,
+.plan-config-item input[type='range'] {
+  width: 100%;
+}
+
+.plan-config-item strong {
+  font-family: var(--display);
+  font-size: 1.2rem;
+}
+
+.plan-estimate-card small {
+  color: var(--subtle);
+  line-height: 1.4;
+}
+
 .week-plan-grid {
   display: grid;
   grid-auto-flow: column;
@@ -1815,6 +1852,11 @@ select {
 
 .week-plan-card h4 {
   margin: 8px 0 0;
+}
+
+.week-plan-card.rest-day {
+  border-style: dashed;
+  background: rgba(238, 247, 255, 0.78);
 }
 
 .overview-panel {
@@ -3399,12 +3441,92 @@ select {
   margin-top: 16px;
 }
 
+.study-planner-card {
+  padding: 24px;
+  border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(255, 250, 236, 0.75));
+  box-shadow: var(--shadow);
+}
+
+.planner-date {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--subtle);
+  background: rgba(255, 183, 207, 0.2);
+}
+
+.planner-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.planner-summary article {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 183, 207, 0.32);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.planner-summary p {
+  margin: 0 0 4px;
+  color: var(--subtle);
+  font-size: 0.82rem;
+}
+
+.planner-summary strong {
+  font-family: var(--display);
+  font-size: 1.5rem;
+}
+
+.planner-task-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.planner-task {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(255, 183, 207, 0.32);
+}
+
+.planner-task input {
+  width: 18px;
+  height: 18px;
+  accent-color: #ff6b9d;
+}
+
+.planner-task span {
+  display: grid;
+}
+
+.planner-task small {
+  color: var(--subtle);
+}
+
 /* ============================================================================
    RESPONSIVE IMPROVEMENTS
    ============================================================================ */
 
 @media (max-width: 1080px) {
   .quick-badge-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .plan-config-grid {
     grid-template-columns: 1fr;
   }
 }

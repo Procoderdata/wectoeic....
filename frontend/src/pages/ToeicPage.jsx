@@ -114,6 +114,8 @@ export default function ToeicPage() {
   const [showGrammarProgress, setShowGrammarProgress] = useState(false);
   const [showVocabBoard, setShowVocabBoard] = useState(false);
   const [shuffleVocabBoard, setShuffleVocabBoard] = useState(false);
+  const [targetToeicScore, setTargetToeicScore] = useState(750);
+  const [studyDaysPerWeek, setStudyDaysPerWeek] = useState(5);
   const [matchingState, setMatchingState] = useState({
     left: '',
     right: '',
@@ -251,6 +253,11 @@ export default function ToeicPage() {
     () => [...moduleProgressCards].sort((a, b) => a.count - b.count).slice(0, 3),
     [moduleProgressCards]
   );
+  const currentToeicEstimate = useMemo(() => {
+    const learningActions = moduleProgressCards.reduce((sum, item) => sum + item.count, 0);
+    const estimate = 450 + learningActions * 6 + streak * 12;
+    return Math.min(990, Math.max(400, estimate));
+  }, [moduleProgressCards, streak]);
   const weeklyPlan = useMemo(() => {
     const today = new Date();
     const skillActionMap = {
@@ -267,6 +274,10 @@ export default function ToeicPage() {
     const fallbackPool = moduleProgressCards.length
       ? moduleProgressCards
       : modules.filter((item) => item.key !== 'profile').map((item) => ({ ...item, count: 0 }));
+    const scoreGap = Math.max(0, targetToeicScore - currentToeicEstimate);
+    const intensityBoost = Math.round(scoreGap / 60);
+    const studyFrequencyBoost = Math.max(0, 6 - studyDaysPerWeek) * 2;
+    const streakBoost = streak ? 4 : 0;
 
     return Array.from({ length: 7 }, (_, dayIndex) => {
       const date = new Date(today);
@@ -274,6 +285,7 @@ export default function ToeicPage() {
       const focus = focusPool[dayIndex % focusPool.length] || fallbackPool[dayIndex % fallbackPool.length];
       const support = fallbackPool[(dayIndex + 2) % fallbackPool.length];
       const gap = Math.max(0, 4 - (focus?.count || 0));
+      const isRestDay = dayIndex >= studyDaysPerWeek;
 
       return {
         id: `${focus?.key || 'module'}-${dayIndex}`,
@@ -281,15 +293,20 @@ export default function ToeicPage() {
         focusKey: focus?.key || 'search',
         focusLabel: focus?.label || 'Tra từ',
         supportLabel: support?.label || 'Flashcard',
-        reason: `Module "${focus?.label || 'Tra từ'}" đang ít hoạt động, nên ưu tiên boost lại tuần này.`,
-        tasks: [
-          skillActionMap[focus?.key] || 'Làm 1 bài tập nhỏ trong module này.',
-          `Kết hợp thêm ${support?.label || 'Flashcard'} để củng cố kiến thức.`,
-        ],
-        xpGoal: 24 + gap * 6 + (streak ? 4 : 0),
+        reason: isRestDay
+          ? 'Ngày nhẹ để review từ đã học và giữ nhịp, tránh quá tải.'
+          : `Module "${focus?.label || 'Tra từ'}" đang ít hoạt động, nên ưu tiên boost để tiến gần mục tiêu ${targetToeicScore}.`,
+        tasks: isRestDay
+          ? ['Ôn lại 5 từ đã lưu và đọc lại note câu sai.', 'Làm 1 hoạt động nhẹ (5-10 phút) để giữ streak.']
+          : [
+              skillActionMap[focus?.key] || 'Làm 1 bài tập nhỏ trong module này.',
+              `Kết hợp thêm ${support?.label || 'Flashcard'} để củng cố kiến thức.`,
+            ],
+        xpGoal: isRestDay ? 12 : 24 + gap * 6 + intensityBoost * 5 + studyFrequencyBoost + streakBoost,
+        isRestDay,
       };
     });
-  }, [moduleProgressCards, streak, weakModules]);
+  }, [currentToeicEstimate, moduleProgressCards, streak, studyDaysPerWeek, targetToeicScore, weakModules]);
   const filteredFullTests = useMemo(() => fullTestPacks, [fullTestPacks]);
   const grammarProgressRows = useMemo(
     () => (
@@ -1320,15 +1337,46 @@ export default function ToeicPage() {
             <div className="section-heading">
               <div>
                 <p className="section-kicker">Auto Study Plan</p>
-                <h4>Kế hoạch 7 ngày theo điểm yếu</h4>
+                <h4>Kế hoạch 7 ngày theo điểm yếu + mục tiêu điểm</h4>
               </div>
               <span className="pill pastel-pink">
                 Điểm yếu: {weakModules.map((item) => item.label).join(' • ') || 'Đang phân tích'}
               </span>
             </div>
+            <div className="plan-config-grid">
+              <label className="plan-config-item">
+                <span>Mục tiêu TOEIC</span>
+                <select
+                  value={targetToeicScore}
+                  onChange={(event) => setTargetToeicScore(Number(event.target.value))}
+                >
+                  {[550, 650, 750, 850, 900].map((score) => (
+                    <option key={score} value={score}>
+                      {score} điểm
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="plan-config-item">
+                <span>Số ngày học/tuần</span>
+                <input
+                  type="range"
+                  min={3}
+                  max={7}
+                  value={studyDaysPerWeek}
+                  onChange={(event) => setStudyDaysPerWeek(Number(event.target.value))}
+                />
+                <strong>{studyDaysPerWeek} ngày</strong>
+              </label>
+              <article className="plan-config-item plan-estimate-card">
+                <span>Ước lượng hiện tại</span>
+                <strong>{currentToeicEstimate}</strong>
+                <small>Khoảng cách tới mục tiêu: {Math.max(0, targetToeicScore - currentToeicEstimate)} điểm</small>
+              </article>
+            </div>
             <div className="week-plan-grid">
               {weeklyPlan.map((day) => (
-                <article key={day.id} className="week-plan-card">
+                <article key={day.id} className={`week-plan-card ${day.isRestDay ? 'rest-day' : ''}`}>
                   <div className="card-title-row align-start">
                     <div>
                       <p className="meta-line">{day.dateLabel}</p>
