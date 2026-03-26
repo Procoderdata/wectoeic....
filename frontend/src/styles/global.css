@@ -2346,9 +2346,7 @@ select {
   box-shadow: var(--shadow-hover);
 }
 
-/* ==========================================================================
-   TOEIC READING / REVIEW / FLASHCARDS
-   ========================================================================== */
+
 
 .toeic-reading-page,
 .toeic-review-page,
@@ -2684,6 +2682,35 @@ select {
   text-align: center;
 }
 
+.flashcards-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+  text-align: left;
+}
+
+.flashcards-config-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(255, 183, 207, 0.25);
+}
+
+.flashcards-config-item span {
+  font-size: 0.82rem;
+  color: var(--subtle);
+}
+
+.flashcards-config-item select {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
 .toeic-flashcard-shell {
   display: grid;
   gap: 14px;
@@ -2721,6 +2748,10 @@ select {
   }
 
   .toeic-reading-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .flashcards-config-grid {
     grid-template-columns: 1fr;
   }
 
@@ -3083,9 +3114,7 @@ select {
   border-color: rgba(124, 184, 255, 0.24);
 }
 
-/* ============================================================================
-   LOADING & EMPTY STATES
-   ============================================================================ */
+
 
 .loading-spinner-container {
   display: flex;
@@ -3139,9 +3168,7 @@ select {
   margin-top: 8px;
 }
 
-/* ============================================================================
-   THEME TOGGLE BUTTON
-   ============================================================================ */
+
 
 .theme-toggle {
   position: relative;
@@ -3191,9 +3218,7 @@ select {
   color: var(--text);
 }
 
-/* ============================================================================
-   ANIMATIONS
-   ============================================================================ */
+
 
 @keyframes spin {
   from {
@@ -3513,9 +3538,88 @@ select {
   color: var(--subtle);
 }
 
-/* ============================================================================
-   RESPONSIVE IMPROVEMENTS
-   ============================================================================ */
+.official-exam-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.official-exam-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.64);
+  background: linear-gradient(160deg, rgba(20, 30, 48, 0.92), rgba(47, 66, 99, 0.82));
+  color: #eef4ff;
+}
+
+.official-exam-header h2 {
+  margin: 6px 0 10px;
+  font-size: clamp(1.5rem, 3.2vw, 2.3rem);
+  color: #fff;
+}
+
+.official-exam-header .subtle {
+  color: rgba(234, 241, 255, 0.82);
+}
+
+.official-badge-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.official-layout-grid {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.official-nav-card {
+  align-self: start;
+  position: sticky;
+  top: 20px;
+}
+
+.official-score-card {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(18, 37, 65, 0.78);
+  color: #f3f7ff;
+}
+
+.official-question-card {
+  background: linear-gradient(140deg, rgba(255, 255, 255, 0.95), rgba(247, 250, 255, 0.9));
+}
+
+.official-question-item {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(190, 205, 231, 0.4);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.official-textarea {
+  width: 100%;
+  border: 1px solid rgba(184, 203, 233, 0.55);
+  border-radius: 14px;
+  padding: 12px;
+  background: #f6f9ff;
+  color: #1d2a3f;
+}
+
+.official-result-block {
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(167, 197, 236, 0.55);
+  background: rgba(231, 242, 255, 0.72);
+}
+
+
 
 @media (max-width: 1080px) {
   .quick-badge-grid {
@@ -3529,6 +3633,16 @@ select {
   .plan-config-grid {
     grid-template-columns: 1fr;
   }
+
+
+  .official-layout-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .official-nav-card {
+    position: static;
+  }
+
 }
 
 @media (max-width: 720px) {

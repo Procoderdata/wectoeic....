@@ -22,6 +22,10 @@ export default function ToeicFlashcardsPage() {
   const [sessionStats, setSessionStats] = useState({ reviewed: 0, strong: 0 });
   const [error, setError] = useState('');
   const [showDeepReview, setShowDeepReview] = useState(false);
+  const [reviewMode, setReviewMode] = useState('due');
+  const [sessionType, setSessionType] = useState('flash');
+  const [quizPicked, setQuizPicked] = useState(null);
+  const [quizFeedback, setQuizFeedback] = useState('');
 
   const loadCards = async () => {
     setLoading(true);
@@ -49,11 +53,19 @@ export default function ToeicFlashcardsPage() {
   );
 
   const startReview = () => {
+    const weakCards = cardsData.items.filter((card) => card.streak <= 1);
     const dueFirst = cardsData.due_items.length ? cardsData.due_items : cardsData.items;
-    setQueue(dueFirst);
+    const modeMap = {
+      due: dueFirst,
+      mixed: [...cardsData.items].sort(() => Math.random() - 0.5),
+      weak: weakCards.length ? weakCards : dueFirst,
+    };
+    setQueue(modeMap[reviewMode] || dueFirst);
     setIndex(0);
     setRevealed(false);
     setShowDeepReview(false);
+    setQuizPicked(null);
+    setQuizFeedback('');
     setSessionStats({ reviewed: 0, strong: 0 });
     setReviewing(true);
   };
@@ -70,6 +82,8 @@ export default function ToeicFlashcardsPage() {
       setIndex((prev) => prev + 1);
       setRevealed(false);
       setShowDeepReview(false);
+      setQuizPicked(null);
+      setQuizFeedback('');
       setError('');
     } catch (err) {
       setError(err.message);
@@ -86,6 +100,13 @@ export default function ToeicFlashcardsPage() {
   if (loading) {
     return <div className="state-card">Đang tải flashcards...</div>;
   }
+
+  const submitQuizAnswer = (pickedIndex) => {
+    if (!activeCard || quizPicked !== null) return;
+    const isCorrect = pickedIndex === activeCard.answer_index;
+    setQuizPicked(pickedIndex);
+    setQuizFeedback(isCorrect ? 'Đúng rồi! +1 confidence' : `Sai, đáp án đúng là ${activeCard.back}`);
+  };
 
   return (
     <div className="toeic-flashcards-page">
@@ -119,7 +140,24 @@ export default function ToeicFlashcardsPage() {
       {!reviewing ? (
         <section className="soft-card toeic-flashcards-start">
           <h3>Bắt đầu phiên review</h3>
-          <p>Hệ thống sẽ ưu tiên các thẻ đến hạn trước. Nếu chưa có thẻ đến hạn sẽ lấy toàn bộ thẻ hiện có.</p>
+          <p>Clone workflow từ Quizlet/Anki: bạn có thể chọn mode và loại phiên trước khi bắt đầu.</p>
+          <div className="flashcards-config-grid">
+            <label className="flashcards-config-item">
+              <span>Review mode</span>
+              <select value={reviewMode} onChange={(event) => setReviewMode(event.target.value)}>
+                <option value="due">Due first</option>
+                <option value="weak">Weak cards</option>
+                <option value="mixed">Mixed shuffle</option>
+              </select>
+            </label>
+            <label className="flashcards-config-item">
+              <span>Session type</span>
+              <select value={sessionType} onChange={(event) => setSessionType(event.target.value)}>
+                <option value="flash">Flash reveal</option>
+                <option value="quiz">Quick test</option>
+              </select>
+            </label>
+          </div>
           <button
             className="primary-btn"
             onClick={startReview}
@@ -145,17 +183,29 @@ export default function ToeicFlashcardsPage() {
             <h3>{activeCard.front}</h3>
             <div className="stack-list">
               {activeCard.options.map((option, optionIndex) => (
-                <div key={`${activeCard.id}-${option}`} className="toeic-flashcard-option">
-                  <strong>{choiceLetter(optionIndex)}.</strong> {option}
-                </div>
+                sessionType === 'quiz' ? (
+                  <button
+                    key={`${activeCard.id}-${option}`}
+                    className={`option-card ${quizPicked === optionIndex ? 'selected' : ''}`}
+                    onClick={() => submitQuizAnswer(optionIndex)}
+                    disabled={quizPicked !== null}
+                  >
+                    <strong>{choiceLetter(optionIndex)}.</strong> {option}
+                  </button>
+                ) : (
+                  <div key={`${activeCard.id}-${option}`} className="toeic-flashcard-option">
+                    <strong>{choiceLetter(optionIndex)}.</strong> {option}
+                  </div>
+                )
               ))}
             </div>
           </div>
 
-          {revealed ? (
+          {revealed || (sessionType === 'quiz' && quizPicked !== null) ? (
             <div className="toeic-flashcard-back">
               <p className="section-kicker">Back</p>
               <p className="toeic-flashcard-answer-line"><strong>Đáp án đúng:</strong> {activeCard.back}</p>
+              {quizFeedback ? <p className="subtle">{quizFeedback}</p> : null}
               {showDeepReview ? (
                 <>
                   <p><strong>Giải thích:</strong> {activeCard.explanation_vi}</p>
@@ -170,7 +220,7 @@ export default function ToeicFlashcardsPage() {
 
           <div className="hero-actions">
             {!revealed ? (
-              <button className="primary-btn" onClick={() => setRevealed(true)}>
+              <button className="primary-btn" onClick={() => setRevealed(true)} disabled={sessionType === 'quiz'}>
                 Reveal Answer
               </button>
             ) : (
@@ -184,6 +234,11 @@ export default function ToeicFlashcardsPage() {
                 <button className="rating-btn easy" onClick={() => rateCard(4)} disabled={submitting}>4 • Rất dễ</button>
               </>
             )}
+            {sessionType === 'quiz' && quizPicked !== null ? (
+              <button className="secondary-btn" onClick={() => setRevealed(true)}>
+                Xem phân tích & chấm mức nhớ
+              </button>
+            ) : null}
           </div>
         </section>
       ) : null}

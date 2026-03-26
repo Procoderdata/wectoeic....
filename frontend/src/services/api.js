@@ -138,6 +138,19 @@ export const toeicExamAPI = {
   },
 };
 
+export const officialExamAPI = {
+  async getExam(examType, skill) {
+    return fetchJson(`/api/${examType}/official/${skill}`);
+  },
+
+  async submitExam(examType, skill, answers) {
+    return fetchJson(`/api/${examType}/official/${skill}/submit`, {
+      method: 'POST',
+      body: JSON.stringify({ answers }),
+    });
+  },
+};
+
 export const toeicReadingAPI = {
   async getSession() {
     return fetchJson('/api/toeic/reading/session');
