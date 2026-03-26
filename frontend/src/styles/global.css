@@ -3399,12 +3399,88 @@ select {
   margin-top: 16px;
 }
 
+.study-planner-card {
+  padding: 24px;
+  border-radius: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.66);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.86), rgba(255, 250, 236, 0.75));
+  box-shadow: var(--shadow);
+}
+
+.planner-date {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--subtle);
+  background: rgba(255, 183, 207, 0.2);
+}
+
+.planner-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.planner-summary article {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 183, 207, 0.32);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.planner-summary p {
+  margin: 0 0 4px;
+  color: var(--subtle);
+  font-size: 0.82rem;
+}
+
+.planner-summary strong {
+  font-family: var(--display);
+  font-size: 1.5rem;
+}
+
+.planner-task-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.planner-task {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.74);
+  border: 1px solid rgba(255, 183, 207, 0.32);
+}
+
+.planner-task input {
+  width: 18px;
+  height: 18px;
+  accent-color: #ff6b9d;
+}
+
+.planner-task span {
+  display: grid;
+}
+
+.planner-task small {
+  color: var(--subtle);
+}
+
 /* ============================================================================
    RESPONSIVE IMPROVEMENTS
    ============================================================================ */
 
 @media (max-width: 1080px) {
   .quick-badge-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .planner-summary {
     grid-template-columns: 1fr;
   }
 }
