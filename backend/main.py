@@ -2694,6 +2694,185 @@ def save_test_result(slug: str, payload: TestSubmission, user_id: str = "demo-us
 # ACHIEVEMENTS & LEADERBOARD
 # ============================================================================
 
+OFFICIAL_EXAMS = {
+    "toeic": {
+        "listening": {
+            "title": "TOEIC Listening Official Simulation",
+            "duration_minutes": 45,
+            "questions": [
+                {"id": "tl-1", "type": "mcq", "prompt": "What time is the meeting scheduled?", "options": ["8:15", "8:30", "9:00", "9:15"], "answer": 1},
+                {"id": "tl-2", "type": "mcq", "prompt": "Which department requested the report?", "options": ["HR", "Sales", "Finance", "IT"], "answer": 2},
+                {"id": "tl-3", "type": "mcq", "prompt": "Where will the client stay?", "options": ["Airport hotel", "Downtown hotel", "Company guesthouse", "Train station inn"], "answer": 0},
+                {"id": "tl-4", "type": "mcq", "prompt": "Why was the shipment delayed?", "options": ["Customs inspection", "Payment issue", "Driver sickness", "Warehouse closure"], "answer": 0},
+                {"id": "tl-5", "type": "mcq", "prompt": "What should employees submit by Friday?", "options": ["Passport copy", "Expense claim", "Updated contract", "Presentation file"], "answer": 1},
+            ],
+        },
+        "reading": {
+            "title": "TOEIC Reading Official Simulation",
+            "duration_minutes": 75,
+            "questions": [
+                {"id": "tr-1", "type": "mcq", "prompt": "The invoice must be paid ____ 10 business days.", "options": ["within", "unless", "although", "between"], "answer": 0},
+                {"id": "tr-2", "type": "mcq", "prompt": "Customers are advised to ____ online before visiting.", "options": ["reserve", "reserving", "reserved", "reservation"], "answer": 0},
+                {"id": "tr-3", "type": "mcq", "prompt": "The memo indicates that parking lot B is ____ renovation.", "options": ["by", "at", "under", "with"], "answer": 2},
+                {"id": "tr-4", "type": "mcq", "prompt": "According to the notice, refunds will be processed in 5 to 7 ____ days.", "options": ["working", "worker", "worked", "works"], "answer": 0},
+                {"id": "tr-5", "type": "mcq", "prompt": "The conference room is unavailable because it has been ____.", "options": ["book", "booking", "booked", "books"], "answer": 2},
+            ],
+        },
+        "speaking": {
+            "title": "TOEIC Speaking Official Simulation",
+            "duration_minutes": 20,
+            "questions": [
+                {"id": "ts-1", "type": "text", "prompt": "Describe a busy day at your workplace and how you prioritized tasks.", "min_words": 60},
+                {"id": "ts-2", "type": "text", "prompt": "Give your opinion: Should companies allow remote work three days a week?", "min_words": 70},
+            ],
+        },
+        "writing": {
+            "title": "TOEIC Writing Official Simulation",
+            "duration_minutes": 60,
+            "questions": [
+                {"id": "tw-1", "type": "text", "prompt": "Write an email to a supplier requesting an urgent delivery update.", "min_words": 90},
+                {"id": "tw-2", "type": "text", "prompt": "Write a short report recommending one process improvement for your team.", "min_words": 120},
+            ],
+        },
+    },
+    "aptis": {
+        "listening": {
+            "title": "Aptis Listening Official Simulation",
+            "duration_minutes": 40,
+            "questions": [
+                {"id": "al-1", "type": "mcq", "prompt": "What is the man mainly worried about?", "options": ["Traffic", "Deadline", "Budget", "Weather"], "answer": 1},
+                {"id": "al-2", "type": "mcq", "prompt": "What will happen after lunch?", "options": ["Factory tour", "Safety training", "Client meeting", "System upgrade"], "answer": 2},
+                {"id": "al-3", "type": "mcq", "prompt": "What does the speaker ask listeners to do?", "options": ["Print forms", "Confirm attendance", "Call support", "Join online"], "answer": 1},
+                {"id": "al-4", "type": "mcq", "prompt": "Where is the new office located?", "options": ["Near airport", "City center", "Industrial park", "University area"], "answer": 3},
+            ],
+        },
+        "reading": {
+            "title": "Aptis Reading Official Simulation",
+            "duration_minutes": 35,
+            "questions": [
+                {"id": "ar-1", "type": "mcq", "prompt": "Select the best heading for a paragraph about healthy routines.", "options": ["Time Management", "Daily Habits", "Work Culture", "Team Building"], "answer": 1},
+                {"id": "ar-2", "type": "mcq", "prompt": "The phrase 'carry out' in the article is closest in meaning to ____.", "options": ["cancel", "perform", "delay", "ignore"], "answer": 1},
+                {"id": "ar-3", "type": "mcq", "prompt": "Which statement is TRUE according to the text?", "options": ["Meetings are optional", "Training is annual", "Feedback is weekly", "Reports are private"], "answer": 2},
+                {"id": "ar-4", "type": "mcq", "prompt": "The writer's tone is mostly ____.", "options": ["critical", "neutral", "encouraging", "confused"], "answer": 2},
+            ],
+        },
+        "speaking": {
+            "title": "Aptis Speaking Official Simulation",
+            "duration_minutes": 12,
+            "questions": [
+                {"id": "as-1", "type": "text", "prompt": "Tell us about your hometown and what visitors can do there.", "min_words": 55},
+                {"id": "as-2", "type": "text", "prompt": "Compare studying online and studying in a classroom.", "min_words": 65},
+            ],
+        },
+        "writing": {
+            "title": "Aptis Writing Official Simulation",
+            "duration_minutes": 50,
+            "questions": [
+                {"id": "aw-1", "type": "text", "prompt": "Write a forum post about a skill you want to improve this year.", "min_words": 80},
+                {"id": "aw-2", "type": "text", "prompt": "Write an article on how technology changes language learning.", "min_words": 130},
+            ],
+        },
+    },
+}
+
+
+class OfficialExamSubmission(BaseModel):
+    answers: dict[str, Any]
+
+
+def _official_score_scale(exam_type: str, skill: str, ratio: float) -> int:
+    if exam_type == "toeic" and skill in {"listening", "reading"}:
+        return int(5 + ratio * 490)
+    if exam_type == "toeic" and skill in {"speaking", "writing"}:
+        return int(40 + ratio * 160)
+    if exam_type == "aptis":
+        return int(1 + ratio * 49)
+    return int(ratio * 100)
+
+
+def _grade_text_answer(answer: str, min_words: int) -> tuple[float, dict[str, Any]]:
+    normalized = (answer or "").strip()
+    words = [item for item in normalized.replace("\n", " ").split(" ") if item]
+    word_count = len(words)
+    sentence_count = max(1, normalized.count(".") + normalized.count("!") + normalized.count("?"))
+    has_linkers = any(linker in normalized.lower() for linker in ["because", "however", "therefore", "although", "moreover"])
+    length_ratio = min(1.0, word_count / max(min_words, 1))
+    structure_ratio = min(1.0, sentence_count / 3)
+    linker_ratio = 1.0 if has_linkers else 0.65
+    final_ratio = max(0.35, min(1.0, length_ratio * 0.6 + structure_ratio * 0.25 + linker_ratio * 0.15))
+
+    return final_ratio, {
+        "word_count": word_count,
+        "min_words": min_words,
+        "sentences": sentence_count,
+        "uses_linker": has_linkers,
+    }
+
+
+def _get_official_exam(exam_type: str, skill: str) -> dict[str, Any]:
+    exam_bank = OFFICIAL_EXAMS.get(exam_type)
+    if not exam_bank or skill not in exam_bank:
+        raise HTTPException(status_code=404, detail="Official exam skill not found")
+    return exam_bank[skill]
+
+
+@app.get("/api/{exam_type}/official/{skill}")
+def get_official_exam(exam_type: str, skill: str) -> dict[str, Any]:
+    exam = _get_official_exam(exam_type, skill)
+    return {
+        "exam_type": exam_type,
+        "skill": skill,
+        "title": exam["title"],
+        "duration_minutes": exam["duration_minutes"],
+        "questions": [{key: value for key, value in question.items() if key != "answer"} for question in exam["questions"]],
+    }
+
+
+@app.post("/api/{exam_type}/official/{skill}/submit")
+def submit_official_exam(exam_type: str, skill: str, payload: OfficialExamSubmission) -> dict[str, Any]:
+    exam = _get_official_exam(exam_type, skill)
+    answers = payload.answers or {}
+    total = len(exam["questions"])
+    if not total:
+        raise HTTPException(status_code=400, detail="Official exam has no questions")
+
+    breakdown = []
+    ratio_sum = 0.0
+    for question in exam["questions"]:
+        provided = answers.get(question["id"], "")
+        if question["type"] == "mcq":
+            is_correct = str(provided).strip() == str(question["answer"])
+            ratio_sum += 1.0 if is_correct else 0.0
+            breakdown.append({
+                "id": question["id"],
+                "type": "mcq",
+                "correct": is_correct,
+                "submitted": provided,
+                "expected": question["answer"],
+            })
+        else:
+            text_ratio, feedback = _grade_text_answer(str(provided), question.get("min_words", 50))
+            ratio_sum += text_ratio
+            breakdown.append({
+                "id": question["id"],
+                "type": "text",
+                "score_ratio": round(text_ratio, 2),
+                "feedback": feedback,
+                "submitted_excerpt": str(provided)[:100],
+            })
+
+    score_ratio = ratio_sum / total
+    return {
+        "exam_type": exam_type,
+        "skill": skill,
+        "title": exam["title"],
+        "accuracy": round(score_ratio * 100, 2),
+        "scaled_score": _official_score_scale(exam_type, skill, score_ratio),
+        "total_questions": total,
+        "submitted_at": datetime.now().isoformat(),
+        "breakdown": breakdown,
+    }
+
 ACHIEVEMENTS = [
     {"id": "first-search", "title": "First Search", "description": "Tra từ đầu tiên", "icon": "🔍", "xp_required": 0, "action_required": "search", "count_required": 1},
     {"id": "word-collector", "title": "Word Collector", "description": "Lưu 5 từ vựng", "icon": "📚", "xp_required": 0, "action_required": "save_word", "count_required": 5},

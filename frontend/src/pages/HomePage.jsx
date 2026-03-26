@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { fetchJson, gamificationAPI, progressAPI } from '../services/api';
 import LeaderboardPanel from '../components/LeaderboardPanel';
 import AchievementsPanel from '../components/AchievementsPanel';
@@ -64,11 +64,48 @@ const testimonials = [
   },
 ];
 
+const plannerModules = [
+  { key: 'reading', title: 'Reading mini set', estimate: '20 phút', xp: 20 },
+  { key: 'flashcard', title: 'Flashcards + recall', estimate: '15 phút', xp: 15 },
+  { key: 'listening', title: 'Listening shadowing', estimate: '25 phút', xp: 25 },
+  { key: 'grammar', title: 'Grammar drills', estimate: '20 phút', xp: 20 },
+];
+
+const plannerStorageKey = 'toeic-study-planner-v1';
+
 export default function HomePage() {
   const [overview, setOverview] = useState(null);
   const [statsOverview, setStatsOverview] = useState(null);
   const [progressStats, setProgressStats] = useState(null);
   const [error, setError] = useState('');
+  const [plannerState, setPlannerState] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(plannerStorageKey) || '{}');
+      return {
+        date: stored.date || new Date().toISOString().slice(0, 10),
+        checkedKeys: stored.checkedKeys || [],
+      };
+    } catch {
+      return {
+        date: new Date().toISOString().slice(0, 10),
+        checkedKeys: [],
+      };
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem(plannerStorageKey, JSON.stringify(plannerState));
+  }, [plannerState]);
+
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (plannerState.date !== today) {
+      setPlannerState({
+        date: today,
+        checkedKeys: [],
+      });
+    }
+  }, [plannerState.date]);
 
   useEffect(() => {
     Promise.all([
@@ -101,6 +138,31 @@ export default function HomePage() {
     { name: 'Matching', value: progressStats.module_counts?.matching || 0 },
     { name: 'Grammar', value: progressStats.module_counts?.grammar || 0 },
   ];
+
+  const plannerProgress = useMemo(
+    () => Math.round((plannerState.checkedKeys.length / plannerModules.length) * 100),
+    [plannerState.checkedKeys.length]
+  );
+
+  const earnedXp = useMemo(
+    () =>
+      plannerModules
+        .filter((item) => plannerState.checkedKeys.includes(item.key))
+        .reduce((total, item) => total + item.xp, 0),
+    [plannerState.checkedKeys]
+  );
+
+  const togglePlannerTask = (key) => {
+    setPlannerState((current) => {
+      const exists = current.checkedKeys.includes(key);
+      return {
+        ...current,
+        checkedKeys: exists
+          ? current.checkedKeys.filter((item) => item !== key)
+          : [...current.checkedKeys, key],
+      };
+    });
+  };
 
   return (
     <div className="home-page">
@@ -258,6 +320,47 @@ export default function HomePage() {
               <p className="meta-line">{item.role}</p>
               <p className="quote">“{item.quote}”</p>
             </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="study-planner-card">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Daily focus planner</p>
+            <h3>Kế hoạch học TOEIC mỗi ngày (checklist tự lưu trên máy)</h3>
+          </div>
+          <span className="planner-date">Ngày {new Date(plannerState.date).toLocaleDateString('vi-VN')}</span>
+        </div>
+
+        <div className="planner-summary">
+          <article>
+            <p>Tiến độ checklist</p>
+            <strong>{plannerProgress}%</strong>
+          </article>
+          <article>
+            <p>Nhiệm vụ hoàn thành</p>
+            <strong>{plannerState.checkedKeys.length}/{plannerModules.length}</strong>
+          </article>
+          <article>
+            <p>XP dự kiến đạt</p>
+            <strong>{earnedXp} XP</strong>
+          </article>
+        </div>
+
+        <div className="planner-task-list">
+          {plannerModules.map((module) => (
+            <label key={module.key} className="planner-task">
+              <input
+                type="checkbox"
+                checked={plannerState.checkedKeys.includes(module.key)}
+                onChange={() => togglePlannerTask(module.key)}
+              />
+              <span>
+                <strong>{module.title}</strong>
+                <small>{module.estimate} • +{module.xp} XP</small>
+              </span>
+            </label>
           ))}
         </div>
       </section>

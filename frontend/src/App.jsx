@@ -10,8 +10,16 @@ const ToeicExamPage = lazy(() => import('./pages/ToeicExamPage'));
 const ToeicReadingPracticePage = lazy(() => import('./pages/ToeicReadingPracticePage'));
 const ToeicReviewImprovePage = lazy(() => import('./pages/ToeicReviewImprovePage'));
 const ToeicFlashcardsPage = lazy(() => import('./pages/ToeicFlashcardsPage'));
+const ToeicOfficialListeningPage = lazy(() => import('./pages/ToeicOfficialListeningPage'));
+const ToeicOfficialReadingPage = lazy(() => import('./pages/ToeicOfficialReadingPage'));
+const ToeicOfficialSpeakingPage = lazy(() => import('./pages/ToeicOfficialSpeakingPage'));
+const ToeicOfficialWritingPage = lazy(() => import('./pages/ToeicOfficialWritingPage'));
 const AptisPage = lazy(() => import('./pages/AptisPage'));
 const AptisCoursePage = lazy(() => import('./pages/AptisCoursePage'));
+const AptisOfficialListeningPage = lazy(() => import('./pages/AptisOfficialListeningPage'));
+const AptisOfficialReadingPage = lazy(() => import('./pages/AptisOfficialReadingPage'));
+const AptisOfficialSpeakingPage = lazy(() => import('./pages/AptisOfficialSpeakingPage'));
+const AptisOfficialWritingPage = lazy(() => import('./pages/AptisOfficialWritingPage'));
 
 function AppShell() {
   const { isDark, toggleTheme } = useTheme();
@@ -38,7 +46,9 @@ function AppShell() {
             <NavLink to="/">Trang chủ</NavLink>
             <NavLink to="/toeic">Toeic</NavLink>
             <NavLink to="/toeic/reading">Reading</NavLink>
+            <NavLink to="/toeic/official/listening">TOEIC Official</NavLink>
             <NavLink to="/aptis">Aptis</NavLink>
+            <NavLink to="/aptis/official/listening">Aptis Official</NavLink>
           </nav>
           <button className="theme-toggle" onClick={toggleTheme} title={isDark ? 'Light mode' : 'Dark mode'}>
             {isDark ? '🌙' : '☀️'}
@@ -59,8 +69,16 @@ function AppShell() {
             <Route path="/toeic/reading" element={<ToeicReadingPracticePage />} />
             <Route path="/toeic/review" element={<ToeicReviewImprovePage />} />
             <Route path="/toeic/flashcards" element={<ToeicFlashcardsPage />} />
+            <Route path="/toeic/official/listening" element={<ToeicOfficialListeningPage />} />
+            <Route path="/toeic/official/reading" element={<ToeicOfficialReadingPage />} />
+            <Route path="/toeic/official/speaking" element={<ToeicOfficialSpeakingPage />} />
+            <Route path="/toeic/official/writing" element={<ToeicOfficialWritingPage />} />
             <Route path="/aptis" element={<AptisPage />} />
             <Route path="/aptis/courses/:slug" element={<AptisCoursePage />} />
+            <Route path="/aptis/official/listening" element={<AptisOfficialListeningPage />} />
+            <Route path="/aptis/official/reading" element={<AptisOfficialReadingPage />} />
+            <Route path="/aptis/official/speaking" element={<AptisOfficialSpeakingPage />} />
+            <Route path="/aptis/official/writing" element={<AptisOfficialWritingPage />} />
           </Routes>
         </Suspense>
       </main>
