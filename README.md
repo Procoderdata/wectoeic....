@@ -51,10 +51,11 @@
 - **FastAPI** - Modern Python web framework
 - **Uvicorn** - ASGI server
 - **Pydantic** - Data validation
+- **PostgreSQL + SQLAlchemy** - Auth/progress persistence
 
 ### Features
 - 25+ REST API endpoints
-- In-memory storage (demo mode)
+- PostgreSQL mode (auto fallback về in-memory nếu DB chưa sẵn sàng)
 - CORS enabled
 - Auto-generated API docs (Swagger)
 
@@ -77,6 +78,29 @@ cd wectoeic
 ```bash
 cd backend
 pip install -r requirements.txt
+```
+
+#### PostgreSQL local cho project (khuyên dùng)
+
+```bash
+cd ..
+./backend/scripts/local_pg.sh init
+./backend/scripts/local_pg.sh start
+./backend/scripts/local_pg.sh createdb
+cp backend/.env.example backend/.env
+```
+
+Đặt `DATABASE_URL` trong `backend/.env` thành:
+
+```env
+DATABASE_URL=postgresql://postgres@localhost:55432/bloom_english
+TEST_DATABASE_URL=postgresql://postgres@localhost:55432/bloom_english_test
+```
+
+Sau đó chạy backend:
+
+```bash
+cd backend
 python main.py
 ```
 
@@ -238,8 +262,8 @@ npm run preview
 - [x] Gamification basics
 
 ### Phase 2: Enhancement 🚀
-- [ ] User authentication (JWT)
-- [ ] Database integration (PostgreSQL)
+- [x] User authentication (JWT)
+- [x] Database integration (PostgreSQL)
 - [ ] Real Text-to-Speech
 - [ ] Dark mode
 - [ ] Mobile responsive

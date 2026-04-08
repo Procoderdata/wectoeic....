@@ -43,8 +43,8 @@ export default function LeaderboardPanel() {
       <div className="stack-list">
         {leaderboard.map((entry, index) => (
           <motion.div
-            key={entry.username}
-            className={`saved-row ${entry.username === 'You' ? 'ok-row' : ''}`}
+            key={entry.user_id || entry.username}
+            className={`saved-row ${entry.is_current_user ? 'ok-row' : ''}`}
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: index * 0.05 }}
@@ -54,11 +54,11 @@ export default function LeaderboardPanel() {
                 {getMedalEmoji(entry.rank)}
               </span>
               <div>
-                <strong>{entry.username}</strong>
+                <strong>{entry.display_name || entry.username}</strong>
                 <p className="subtle">{entry.xp} XP • {entry.streak} ngày streak</p>
               </div>
             </div>
-            {entry.username === 'You' && (
+            {entry.is_current_user && (
               <span className="pill pastel-pink">Bạn</span>
             )}
           </motion.div>

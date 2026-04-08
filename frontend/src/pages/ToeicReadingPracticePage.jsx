@@ -178,7 +178,7 @@ export default function ToeicReadingPracticePage() {
         <div className="toeic-reading-topbar-left">
           <button className="ghost-btn" onClick={() => navigate('/toeic')}>← Exit</button>
           <div>
-            <p className="section-kicker">Reading Practice</p>
+            <p className="section-kicker">TOEIC Exam • Reading (1/4)</p>
             <h3>{currentQuestion.range_label} • {session.title}</h3>
           </div>
         </div>

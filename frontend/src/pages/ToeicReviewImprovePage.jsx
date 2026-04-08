@@ -101,7 +101,7 @@ export default function ToeicReviewImprovePage() {
           <p>Ôn lại câu sai, thêm note cá nhân, và chuyển nhanh sang flashcard.</p>
         </div>
         <div className="hero-actions">
-          <button className="ghost-btn" onClick={() => navigate('/toeic/reading')}>Quay lại Reading</button>
+          <button className="ghost-btn" onClick={() => navigate('/toeic/reading')}>Quay lại TOEIC Reading</button>
           <button className="secondary-btn" onClick={() => navigate('/toeic/flashcards')}>Mở Flashcards</button>
         </div>
       </section>

@@ -1,14 +1,75 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const ACCESS_TOKEN_KEY = 'bloom_access_token';
+const REFRESH_TOKEN_KEY = 'bloom_refresh_token';
+const ADMIN_ACCESS_TOKEN_KEY = 'bloom_admin_access_token';
 
 export { API_BASE_URL };
 
+function getStoredToken(key) {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(key);
+}
+
+function setStoredToken(key, value) {
+  if (typeof window === 'undefined') return;
+  if (!value) {
+    window.localStorage.removeItem(key);
+    return;
+  }
+  window.localStorage.setItem(key, value);
+}
+
+export function getAccessToken() {
+  return getStoredToken(ACCESS_TOKEN_KEY);
+}
+
+export function getRefreshToken() {
+  return getStoredToken(REFRESH_TOKEN_KEY);
+}
+
+export function getAdminAccessToken() {
+  return getStoredToken(ADMIN_ACCESS_TOKEN_KEY);
+}
+
+export function setAuthTokens(tokens = {}) {
+  setStoredToken(ACCESS_TOKEN_KEY, tokens.access_token);
+  setStoredToken(REFRESH_TOKEN_KEY, tokens.refresh_token);
+}
+
+export function setAdminAuthTokens(tokens = {}) {
+  setStoredToken(ADMIN_ACCESS_TOKEN_KEY, tokens.access_token);
+}
+
+export function clearAuthTokens() {
+  setStoredToken(ACCESS_TOKEN_KEY, null);
+  setStoredToken(REFRESH_TOKEN_KEY, null);
+}
+
+export function clearAdminAuthTokens() {
+  setStoredToken(ADMIN_ACCESS_TOKEN_KEY, null);
+}
+
 export async function fetchJson(path, options = {}) {
+  const { authMode = 'student', headers: optionHeaders, ...requestOptions } = options;
+  const accessToken =
+    authMode === 'admin'
+      ? getAdminAccessToken()
+      : authMode === 'none'
+        ? null
+        : getAccessToken();
+  const isFormData = typeof FormData !== 'undefined' && requestOptions.body instanceof FormData;
+  const headers = {
+    ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    ...(optionHeaders || {}),
+  };
+
+  if (!isFormData && !Object.keys(headers).some((key) => key.toLowerCase() === 'content-type')) {
+    headers['Content-Type'] = 'application/json';
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    },
-    ...options,
+    headers,
+    ...requestOptions,
   });
 
   if (!response.ok) {
@@ -19,11 +80,90 @@ export async function fetchJson(path, options = {}) {
     } catch {
       // noop
     }
-    throw new Error(detail);
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
   }
 
   return response.json();
 }
+
+// ============================================================================
+// AUTH API
+// ============================================================================
+
+export const authAPI = {
+  async loginWithGoogle(credential) {
+    const res = await fetchJson('/api/auth/google', {
+      method: 'POST',
+      authMode: 'none',
+      body: JSON.stringify({ credential }),
+    });
+    if (res?.tokens) setAuthTokens(res.tokens);
+    return res;
+  },
+
+  async me() {
+    return fetchJson('/api/auth/me');
+  },
+
+  async refresh(refreshToken = getRefreshToken()) {
+    if (!refreshToken) {
+      throw new Error('Missing refresh token');
+    }
+    const res = await fetchJson('/api/auth/refresh', {
+      method: 'POST',
+      authMode: 'none',
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (res?.tokens) setAuthTokens(res.tokens);
+    return res;
+  },
+
+  async logout() {
+    const refreshToken = getRefreshToken();
+    try {
+      return await fetchJson('/api/auth/logout', {
+        method: 'POST',
+        authMode: 'none',
+        body: JSON.stringify({
+          refresh_token: refreshToken || null,
+        }),
+      });
+    } finally {
+      clearAuthTokens();
+    }
+  },
+};
+
+export const adminAuthAPI = {
+  async login(payload) {
+    const res = await fetchJson('/api/admin/auth/login', {
+      method: 'POST',
+      authMode: 'none',
+      body: JSON.stringify(payload),
+    });
+    if (res?.tokens) setAdminAuthTokens(res.tokens);
+    return res;
+  },
+
+  async me() {
+    return fetchJson('/api/admin/auth/me', {
+      authMode: 'admin',
+    });
+  },
+
+  async logout() {
+    try {
+      return await fetchJson('/api/admin/auth/logout', {
+        method: 'POST',
+        authMode: 'admin',
+      });
+    } finally {
+      clearAdminAuthTokens();
+    }
+  },
+};
 
 // ============================================================================
 // PROGRESS API
@@ -80,10 +220,10 @@ export const toeicAPI = {
     return fetchJson(`/api/toeic/full-tests${queryString ? `?${queryString}` : ''}`);
   },
 
-  async launchFullTest(packId, mode = 'practice', userId = 'demo-user') {
+  async launchFullTest(packId, mode = 'practice', userId = 'demo-user', selectedParts = []) {
     return fetchJson(`/api/toeic/full-tests/${packId}/launch`, {
       method: 'POST',
-      body: JSON.stringify({ mode, user_id: userId }),
+      body: JSON.stringify({ mode, user_id: userId, selected_parts: selectedParts }),
     });
   },
 
@@ -226,5 +366,64 @@ export const gamificationAPI = {
 
   async getStatsOverview() {
     return fetchJson('/api/stats/overview');
+  },
+};
+
+export const adminAPI = {
+  async getOverview() {
+    return fetchJson('/api/admin/toeic/overview', {
+      authMode: 'admin',
+    });
+  },
+
+  async getFullTests() {
+    return fetchJson('/api/admin/toeic/full-tests', {
+      authMode: 'admin',
+    });
+  },
+
+  async getFullTestDetail(packId) {
+    return fetchJson(`/api/admin/toeic/full-tests/${packId}`, {
+      authMode: 'admin',
+    });
+  },
+
+  async saveFullTest(payload) {
+    return fetchJson('/api/admin/toeic/full-tests', {
+      method: 'POST',
+      authMode: 'admin',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async deleteFullTest(packId) {
+    return fetchJson(`/api/admin/toeic/full-tests/${packId}`, {
+      method: 'DELETE',
+      authMode: 'admin',
+    });
+  },
+
+  async importJson(payload) {
+    return fetchJson('/api/admin/toeic/import-json', {
+      method: 'POST',
+      authMode: 'admin',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  async importFile(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+    return fetchJson('/api/admin/toeic/import-file', {
+      method: 'POST',
+      authMode: 'admin',
+      body: formData,
+    });
+  },
+
+  async exportBundle() {
+    return fetchJson('/api/admin/toeic/export', {
+      authMode: 'admin',
+    });
   },
 };

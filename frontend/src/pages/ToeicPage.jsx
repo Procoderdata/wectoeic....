@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchJson, toeicAPI } from '../services/api';
 import { useProgress } from '../hooks/useProgress';
 
@@ -82,6 +82,8 @@ function getChoiceLetter(index) {
 
 export default function ToeicPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const fullTestSectionRef = useRef(null);
   const [sets, setSets] = useState([]);
   const [grammarTopics, setGrammarTopics] = useState([]);
   const [selectedModule, setSelectedModule] = useState('');
@@ -123,6 +125,14 @@ export default function ToeicPage() {
   });
   const [error, setError] = useState('');
   const { progress, streak, savedWordIds, toggleSavedWord, recordActivity, loading, refreshProgress } = useProgress();
+
+  useEffect(() => {
+    const moduleParam = searchParams.get('module');
+    if (!moduleParam) return;
+    if (!modules.some((item) => item.key === moduleParam)) return;
+    setShowLearningTools(true);
+    setSelectedModule(moduleParam);
+  }, [searchParams]);
 
   useEffect(() => {
     Promise.all([
@@ -200,12 +210,6 @@ export default function ToeicPage() {
   const currentListeningWord = activeWords[listeningIndex];
   const currentTypingWord = activeWords[typingIndex];
   const activeGrammar = grammarTopics.find((topic) => topic.id === activeGrammarId) || grammarTopics[0];
-  const activeModuleMeta = modules.find((item) => item.key === selectedModule) || {
-    key: '',
-    label: 'Chọn module chính',
-    description: 'Giao diện chi tiết chỉ mở khi học sinh bấm vào chức năng cần học.',
-  };
-
   const dashboardStats = useMemo(
     () => [
       { label: 'Tổng XP', value: progress.totalXp },
@@ -317,6 +321,14 @@ export default function ToeicPage() {
     () => (shuffleVocabBoard ? shuffle(vocabLessonBoard) : vocabLessonBoard),
     [shuffleVocabBoard, vocabLessonBoard]
   );
+  const completedChecklistCount = todayChecklist.filter((item) => item.done).length;
+  const latestActivity = progress.lastActions[0] || null;
+  const priorityTitle = completedChecklistCount === todayChecklist.length
+    ? 'Ôn tập hoàn thành'
+    : `Nhiệm vụ hôm nay ${completedChecklistCount}/${todayChecklist.length}`;
+  const prioritySubtitle = completedChecklistCount === todayChecklist.length
+    ? 'Bạn đã hoàn thành toàn bộ checklist học tập.'
+    : 'Tiếp tục hoàn thiện checklist để giữ streak ổn định.';
 
   const runSearch = async (term) => {
     const normalized = term.trim();
@@ -338,6 +350,17 @@ export default function ToeicPage() {
 
   const handleQuickSearch = async (term) => {
     await runSearch(term);
+  };
+
+  const scrollToFullTests = () => {
+    if (!showExpandedDashboard) {
+      setShowExpandedDashboard(true);
+      window.setTimeout(() => {
+        fullTestSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 60);
+      return;
+    }
+    fullTestSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
   const goToNextFlashcard = () => {
@@ -458,6 +481,15 @@ export default function ToeicPage() {
     try {
       await toeicAPI.launchFullTest(packId, mode);
       await refreshProgress();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const runFullTestSearch = async () => {
+    try {
+      const data = await toeicAPI.getFullTests(selectedTestSeries, fullTestQuery);
+      setFullTestPacks(data.items || []);
     } catch (err) {
       setError(err.message);
     }
@@ -1083,55 +1115,74 @@ export default function ToeicPage() {
 
   return (
     <div className="toeic-page">
-      <section className="dashboard-hero toeic-dashboard-hero">
-        <div className="toeic-hero-main">
-          <span className="pill pastel-pink">Inspired by Charnishere</span>
-          <h2>TOEIC studio pastel, cute, học là có vibe mỗi ngày</h2>
-          <p>
-            Giữ tinh thần dashboard học từ vựng của Charnishere: quick modules, bộ từ vựng, progress nhẹ nhàng, streak và profile.
-          </p>
-
-          <div className="hero-actions">
-            <div className="hero-mini-chip">
-              <strong>{selectedSet?.title || 'Đang tải bộ từ vựng'}</strong>
-              <span>{selectedSet?.theme || 'Theme'}</span>
-            </div>
-            <div className="hero-mini-chip">
-              <strong>{selectedSet?.level || 'Level'}</strong>
-              <span>{activeWords.length} từ trong bộ</span>
-            </div>
-          </div>
-
-          <div className="hero-streak-ribbon">
-            <span>Daily mood board</span>
-            <strong>{streak ? `${streak} ngày liên tiếp` : 'Bắt đầu streak hôm nay'}</strong>
-            <p className="subtle">Mở mỗi module như một mini station: tra từ, quiz, typing, listening, matching và grammar.</p>
-          </div>
+      <section className="soft-card toeic-command-board">
+        <div className="toeic-quick-nav">
+          <button className="filter-pill active" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>Trang chủ</button>
+          <button className="filter-pill" onClick={scrollToFullTests}>Luyện thi</button>
+          <button className="filter-pill" onClick={() => setSelectedModule('profile')}>Xếp hạng</button>
+          <button className="filter-pill" onClick={() => setShowExpandedDashboard(true)}>Nhiệm vụ</button>
+          <button className="filter-pill" onClick={() => setSelectedModule('profile')}>Hồ sơ</button>
+          <button className="filter-pill" onClick={() => setShowLearningTools((prev) => !prev)}>Cài đặt</button>
         </div>
 
-        <div className="hero-stats">
-          {dashboardStats.map((stat) => (
-            <div key={stat.label} className="stats-pill">
-              <span>{stat.label}</span>
-              <strong>{stat.value}</strong>
-            </div>
-          ))}
-          <div className="hero-note-card">
-            <p className="section-kicker">Quick note</p>
-            <h4>{activeModuleMeta.label}</h4>
-            <p>{activeModuleMeta.description}</p>
-          </div>
-          <div className="hero-note-card mission-preview-card">
-            <p className="section-kicker">Daily mission</p>
-            <div className="mission-mini-list">
-              {todayChecklist.map((item) => (
-                <div key={item.label} className={`mission-mini-item ${item.done ? 'done' : ''}`}>
-                  <span>{item.done ? '✓' : '•'}</span>
-                  <small>{item.label}</small>
-                </div>
-              ))}
-            </div>
-          </div>
+        <article className="toeic-priority-card">
+          <p className="section-kicker">Nhiệm vụ ưu tiên</p>
+          <h4>{priorityTitle}</h4>
+          <p>{prioritySubtitle}</p>
+        </article>
+
+        <div className="toeic-activity-strip">
+          <span>📣</span>
+          <p>
+            {latestActivity
+              ? `${latestActivity.title} vừa được hoàn thành • +${latestActivity.xp || 0} XP`
+              : 'Chưa có activity mới. Hãy hoàn thành một module để cập nhật bảng hoạt động.'}
+          </p>
+        </div>
+
+        <div className="search-bar-soft toeic-inline-search">
+          <input
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Nhập từ vựng cần tra cứu..."
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') handleSearch();
+            }}
+          />
+          <button className="primary-btn" onClick={handleSearch}>Tìm</button>
+        </div>
+
+        <div className="toeic-command-grid">
+          <button className="quick-hub-card" onClick={() => setShowVocabBoard(true)}>
+            <span className="quick-hub-icon">📚</span>
+            <strong>Từ vựng TOEIC</strong>
+            <small>Mở kho theo chủ đề</small>
+          </button>
+          <button className="quick-hub-card" onClick={() => setShowGrammarProgress(true)}>
+            <span className="quick-hub-icon">📝</span>
+            <strong>Ngữ pháp</strong>
+            <small>Lý thuyết và bài tập</small>
+          </button>
+          <button className="quick-hub-card" onClick={scrollToFullTests}>
+            <span className="quick-hub-icon">📄</span>
+            <strong>Luyện thi</strong>
+            <small>Vào danh sách đề thi</small>
+          </button>
+          <button className="quick-hub-card" onClick={() => setSelectedModule('profile')}>
+            <span className="quick-hub-icon">💛</span>
+            <strong>Đã lưu</strong>
+            <small>{progress.savedWords.length} từ đã lưu</small>
+          </button>
+          <button className="quick-hub-card" onClick={() => setShowExpandedDashboard(true)}>
+            <span className="quick-hub-icon">✅</span>
+            <strong>Nhiệm vụ</strong>
+            <small>{completedChecklistCount}/{todayChecklist.length} hoàn thành</small>
+          </button>
+          <button className="quick-hub-card" onClick={() => setSelectedModule('profile')}>
+            <span className="quick-hub-icon">🏆</span>
+            <strong>Hồ sơ</strong>
+            <small>XP, streak, hoạt động</small>
+          </button>
         </div>
       </section>
 
@@ -1216,25 +1267,25 @@ export default function ToeicPage() {
               </div>
             </div>
             <div className="quick-hub-grid compact-core-grid">
-              <button className="quick-hub-card" onClick={() => navigate('/toeic/reading')}>
+              <button className="quick-hub-card" onClick={() => navigate('/toeic/exam/reading')}>
                 <span className="quick-hub-icon">📖</span>
-                <strong>Reading Practice</strong>
-                <small>Thi reading + giải thích</small>
+                <strong>TOEIC Reading</strong>
+                <small>Kỹ năng Reading trong bài thi TOEIC</small>
+              </button>
+              <button className="quick-hub-card" onClick={() => navigate('/toeic/exam/listening')}>
+                <span className="quick-hub-icon">🎧</span>
+                <strong>TOEIC Listening</strong>
+                <small>Kỹ năng Listening trong bài thi TOEIC</small>
               </button>
               <button className="quick-hub-card" onClick={() => navigate('/toeic/review')}>
                 <span className="quick-hub-icon">🧠</span>
                 <strong>Review & Improve</strong>
                 <small>Ôn câu sai + note</small>
               </button>
-              <button className="quick-hub-card" onClick={() => navigate('/toeic/flashcards')}>
-                <span className="quick-hub-icon">📇</span>
-                <strong>Flashcards SRS</strong>
-                <small>Tự động từ câu sai</small>
-              </button>
-              <button className="quick-hub-card" onClick={() => navigate('/toeic/exam/lrsw')}>
+              <button className="quick-hub-card" onClick={() => navigate('/toeic/exam/lr')}>
                 <span className="quick-hub-icon">📄</span>
-                <strong>TOEIC Exam</strong>
-                <small>Luyện đề 4 kỹ năng</small>
+                <strong>TOEIC L&R Exam</strong>
+                <small>Luyện đề kết hợp Listening + Reading</small>
               </button>
             </div>
           </section>
@@ -1359,13 +1410,18 @@ export default function ToeicPage() {
                 <p className="section-kicker">Quick hub</p>
                 <h4>Mo nhanh cac khu trong 1 click</h4>
               </div>
-              <span className="pill pastel-pink">Charnishere style</span>
+              <span className="pill pastel-pink">Core actions</span>
             </div>
             <div className="quick-hub-grid">
-              <button className="quick-hub-card" onClick={() => navigate('/toeic/reading')}>
+              <button className="quick-hub-card" onClick={() => navigate('/toeic/exam/reading')}>
                 <span className="quick-hub-icon">📖</span>
-                <strong>Reading Practice</strong>
-                <small>Giao diện thi reading + giải thích</small>
+                <strong>TOEIC Reading</strong>
+                <small>Thi kỹ năng Reading + giải thích</small>
+              </button>
+              <button className="quick-hub-card" onClick={() => navigate('/toeic/exam/listening')}>
+                <span className="quick-hub-icon">🎧</span>
+                <strong>TOEIC Listening</strong>
+                <small>Thi kỹ năng Listening có audio mô phỏng</small>
               </button>
               <button className="quick-hub-card" onClick={() => navigate('/toeic/review')}>
                 <span className="quick-hub-icon">🧠</span>
@@ -1397,15 +1453,15 @@ export default function ToeicPage() {
                 <strong>Ho so</strong>
                 <small>Thanh tich va lich su</small>
               </button>
-              <button className="quick-hub-card wide" onClick={() => navigate('/toeic/exam/lrsw')}>
+              <button className="quick-hub-card wide" onClick={() => navigate('/toeic/exam/lr')}>
                 <span className="quick-hub-icon">📄</span>
                 <strong>Luyen thi</strong>
-                <small>Phong thi TOEIC 4 ky nang theo giao dien exam</small>
+                <small>Phong thi TOEIC Listening + Reading theo giao dien exam</small>
               </button>
             </div>
           </section>
 
-          <section className="soft-card full-test-center">
+          <section ref={fullTestSectionRef} className="soft-card full-test-center">
             <div className="section-heading">
               <div>
                 <p className="section-kicker">Chinh phuc TOEIC full test</p>
@@ -1413,7 +1469,7 @@ export default function ToeicPage() {
               </div>
               <div className="hero-actions">
                 <span className="pill pastel-blue">{filteredFullTests.length} de</span>
-                <button className="ghost-btn" onClick={() => navigate('/toeic/exam/lrsw')}>Thi 4 kỹ năng</button>
+                <button className="ghost-btn" onClick={() => navigate('/toeic/exam/lr')}>Thi Listening + Reading</button>
               </div>
             </div>
 
@@ -1422,8 +1478,13 @@ export default function ToeicPage() {
                 value={fullTestQuery}
                 onChange={(event) => setFullTestQuery(event.target.value)}
                 placeholder="Tim kiem bo de..."
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    runFullTestSearch();
+                  }
+                }}
               />
-              <button className="primary-btn" onClick={() => setSelectedModule('quiz')}>Tim</button>
+              <button className="primary-btn" onClick={runFullTestSearch}>Tim</button>
             </div>
 
             <div className="full-test-series-row">

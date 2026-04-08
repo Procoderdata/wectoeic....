@@ -97,7 +97,7 @@ export default function ToeicFlashcardsPage() {
         </div>
         <div className="hero-actions">
           <button className="ghost-btn" onClick={() => navigate('/toeic/review')}>Review & Improve</button>
-          <button className="ghost-btn" onClick={() => navigate('/toeic/reading')}>Quay lại Reading</button>
+          <button className="ghost-btn" onClick={() => navigate('/toeic/reading')}>Quay lại TOEIC Reading</button>
         </div>
       </section>
 

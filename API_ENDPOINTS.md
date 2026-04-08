@@ -25,6 +25,37 @@
 
 ## 🆕 Mới bổ sung
 
+### Authentication (Demo In-Memory)
+- `POST /api/auth/register` - Tạo tài khoản mới
+  ```json
+  {
+    "email": "you@example.com",
+    "username": "you123",
+    "password": "password123",
+    "full_name": "Your Name"
+  }
+  ```
+- `POST /api/auth/login` - Đăng nhập bằng email + password
+  ```json
+  {
+    "email": "you@example.com",
+    "password": "password123"
+  }
+  ```
+- `POST /api/auth/refresh` - Làm mới access token bằng refresh token
+  ```json
+  {
+    "refresh_token": "..."
+  }
+  ```
+- `GET /api/auth/me` - Lấy user hiện tại từ `Authorization: Bearer <access_token>`
+- `POST /api/auth/logout` - Đăng xuất (xoá access token hiện tại, optional refresh token)
+  ```json
+  {
+    "refresh_token": "..."
+  }
+  ```
+
 ### TOEIC - Listening & Typing Practice
 - `GET /api/toeic/listening/{set_id}` - Lấy dữ liệu luyện nghe
 - `GET /api/toeic/typing/{set_id}` - Lấy dữ liệu luyện gõ từ
@@ -195,8 +226,8 @@ Hiện tại backend đang dùng in-memory storage (dictionary) để demo:
 ### Production Ready
 Để deploy production, cần:
 1. Thay thế in-memory storage bằng database (PostgreSQL, MongoDB)
-2. Thêm authentication (JWT tokens)
-3. Thêm user management
+2. Chuyển auth demo in-memory sang JWT + persistent sessions (DB/Redis)
+3. Bổ sung user management nâng cao
 4. Rate limiting
 5. Caching (Redis)
 6. File storage cho audio/video

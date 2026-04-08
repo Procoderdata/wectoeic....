@@ -6,11 +6,7 @@ import { useProgress } from '../hooks/useProgress';
 const PRESET_MAP = {
   listening: ['listening'],
   reading: ['reading'],
-  speaking: ['speaking'],
-  writing: ['writing'],
   lr: ['listening', 'reading'],
-  lrs: ['listening', 'reading', 'speaking'],
-  lrsw: ['listening', 'reading', 'speaking', 'writing'],
 };
 
 function normalizeSkills(skills, availableSkills) {
@@ -28,7 +24,7 @@ function getPresetKeyFromSkills(skills) {
   for (const [key, presetSkills] of entries) {
     if ([...presetSkills].sort().join('|') === normalized) return key;
   }
-  return 'custom';
+  return 'lr';
 }
 
 function speakPrompt(text) {
@@ -40,8 +36,9 @@ function speakPrompt(text) {
 }
 
 function formatDuration(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
+  const safe = Math.max(0, seconds);
+  const minutes = Math.floor(safe / 60);
+  const remainder = safe % 60;
   return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
 }
 
@@ -109,7 +106,9 @@ export default function ToeicExamPage() {
     if (!config.skills.length) return;
     const presetSkills = PRESET_MAP[preset] || PRESET_MAP.lr;
     const normalized = normalizeSkills(presetSkills, config.skills);
-    if (normalized.length) setSelectedSkills(normalized);
+    if (normalized.length) {
+      setSelectedSkills(normalized);
+    }
   }, [config.skills, preset]);
 
   useEffect(() => {
@@ -123,11 +122,12 @@ export default function ToeicExamPage() {
       setRemainingSeconds(0);
       return;
     }
+
     toeicExamAPI.getSession(sessionId)
       .then((data) => {
         autoSubmittedRef.current = false;
         setSession(data);
-        if (data.skills?.length) {
+        if (Array.isArray(data.skills) && data.skills.length) {
           setSelectedSkills(data.skills);
         }
         setCurrentSectionIndex(0);
@@ -153,7 +153,16 @@ export default function ToeicExamPage() {
       setRemainingSeconds((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
     return () => window.clearInterval(timer);
-  }, [session, result, remainingSeconds]);
+  }, [remainingSeconds, result, session]);
+
+  useEffect(() => {
+    if (!sessionId || !session || result || typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(getAnswerStorageKey(sessionId), JSON.stringify(answers));
+    } catch {
+      // ignore local storage errors
+    }
+  }, [answers, result, session, sessionId]);
 
   const currentSection = session?.sections?.[currentSectionIndex] || null;
   const currentQuestion = currentSection?.questions?.[currentQuestionIndex] || null;
@@ -176,19 +185,11 @@ export default function ToeicExamPage() {
     return session.sections.reduce((sum, section) => sum + section.questions.length, 0);
   }, [session]);
 
-  const toggleSkill = (skillKey) => {
-    setSelectedSkills((prev) => {
-      if (prev.includes(skillKey)) return prev.filter((item) => item !== skillKey);
-      return [...prev, skillKey];
-    });
-  };
-
   const setPresetSkills = (skills) => {
     const normalized = normalizeSkills(skills, config.skills);
     if (!normalized.length) return;
     setSelectedSkills(normalized);
-    const presetKey = getPresetKeyFromSkills(normalized);
-    navigate(`/toeic/exam/${presetKey}`);
+    navigate(`/toeic/exam/${getPresetKeyFromSkills(normalized)}`);
   };
 
   const startExam = async () => {
@@ -203,9 +204,8 @@ export default function ToeicExamPage() {
       setRemainingSeconds((data.recommended_minutes || 20) * 60);
       setResult(null);
       setError('');
-      recordActivity('quiz', { title: `Start TOEIC 4 skills • ${data.theme_label}`, xp: 6 });
-      const presetKey = getPresetKeyFromSkills(selectedSkills);
-      navigate(`/toeic/exam/${presetKey}/session/${data.id}`);
+      recordActivity('quiz', { title: `Start TOEIC L&R • ${data.theme_label}`, xp: 6 });
+      navigate(`/toeic/exam/${getPresetKeyFromSkills(selectedSkills)}/session/${data.id}`);
     } catch (err) {
       setError(err.message);
     }
@@ -222,6 +222,33 @@ export default function ToeicExamPage() {
   const goToQuestion = (sectionIndex, questionIndex) => {
     setCurrentSectionIndex(sectionIndex);
     setCurrentQuestionIndex(questionIndex);
+  };
+
+  const nextQuestion = () => {
+    if (!session || !currentSection) return;
+    const isLastQuestionInSection = currentQuestionIndex >= currentSection.questions.length - 1;
+    if (!isLastQuestionInSection) {
+      setCurrentQuestionIndex((prev) => prev + 1);
+      return;
+    }
+    if (currentSectionIndex < session.sections.length - 1) {
+      setCurrentSectionIndex((prev) => prev + 1);
+      setCurrentQuestionIndex(0);
+    }
+  };
+
+  const previousQuestion = () => {
+    if (!session || !currentSection) return;
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex((prev) => prev - 1);
+      return;
+    }
+    if (currentSectionIndex > 0) {
+      const prevSectionIndex = currentSectionIndex - 1;
+      const prevSection = session.sections[prevSectionIndex];
+      setCurrentSectionIndex(prevSectionIndex);
+      setCurrentQuestionIndex(Math.max(prevSection.questions.length - 1, 0));
+    }
   };
 
   const submitExam = useCallback(async () => {
@@ -254,50 +281,14 @@ export default function ToeicExamPage() {
   }, [answers, refreshProgress, session, submitting]);
 
   useEffect(() => {
-    if (!sessionId || !session || result || typeof window === 'undefined') return;
-    try {
-      window.localStorage.setItem(getAnswerStorageKey(sessionId), JSON.stringify(answers));
-    } catch {
-      // ignore local storage errors
-    }
-  }, [answers, result, session, sessionId]);
-
-  useEffect(() => {
     if (!session || result || submitting || remainingSeconds > 0) return;
     if (autoSubmittedRef.current) return;
     autoSubmittedRef.current = true;
     submitExam();
   }, [remainingSeconds, result, session, submitExam, submitting]);
 
-  const nextQuestion = () => {
-    if (!session || !currentSection) return;
-    const isLastQuestionInSection = currentQuestionIndex >= currentSection.questions.length - 1;
-    if (!isLastQuestionInSection) {
-      setCurrentQuestionIndex((prev) => prev + 1);
-      return;
-    }
-    if (currentSectionIndex < session.sections.length - 1) {
-      setCurrentSectionIndex((prev) => prev + 1);
-      setCurrentQuestionIndex(0);
-    }
-  };
-
-  const previousQuestion = () => {
-    if (!session || !currentSection) return;
-    if (currentQuestionIndex > 0) {
-      setCurrentQuestionIndex((prev) => prev - 1);
-      return;
-    }
-    if (currentSectionIndex > 0) {
-      const prevSectionIndex = currentSectionIndex - 1;
-      const prevSection = session.sections[prevSectionIndex];
-      setCurrentSectionIndex(prevSectionIndex);
-      setCurrentQuestionIndex(Math.max(prevSection.questions.length - 1, 0));
-    }
-  };
-
   if (loading) {
-    return <div className="state-card">Dang tai phong thi TOEIC...</div>;
+    return <div className="state-card">Đang tải phòng thi TOEIC...</div>;
   }
 
   if (error && !session) {
@@ -305,63 +296,83 @@ export default function ToeicExamPage() {
   }
 
   if (!session) {
+    const configSkillMap = new Map(config.skills.map((skill) => [skill.key, skill]));
+
     return (
-      <div className="toeic-exam-page">
-        <section className="toeic-exam-setup">
-          <div className="toeic-exam-header-row">
+      <div className="toeic-room-page">
+        <section className="toeic-room-setup">
+          <div className="toeic-room-header">
             <button className="ghost-btn" onClick={() => navigate('/toeic')}>← Quay lại TOEIC</button>
-            <span className="pill exam-pill">Official-style TOEIC 4 skills</span>
+            <span className="pill exam-pill">TOEIC Exam Room • Reading + Listening</span>
           </div>
 
-          <h2>Phòng Thi TOEIC 4 Kỹ Năng</h2>
-          <p>Chọn 1-4 kỹ năng hoặc gộp 2/3/4 kỹ năng rồi bắt đầu bài làm. Theme bài tập được áp dụng xuyên suốt đề.</p>
-
-          <div className="toeic-exam-presets">
-            <button className="topic-chip" onClick={() => setPresetSkills(['listening'])}>1 kỹ năng: Listening</button>
-            <button className="topic-chip" onClick={() => setPresetSkills(['reading'])}>1 kỹ năng: Reading</button>
-            <button className="topic-chip" onClick={() => setPresetSkills(['listening', 'reading'])}>2 kỹ năng: L + R</button>
-            <button className="topic-chip" onClick={() => setPresetSkills(['listening', 'reading', 'speaking'])}>3 kỹ năng: L + R + S</button>
-            <button className="topic-chip" onClick={() => setPresetSkills(['listening', 'reading', 'speaking', 'writing'])}>4 kỹ năng Full</button>
+          <div className="toeic-room-intro">
+            <h2>Phòng thi TOEIC học thuật</h2>
+            <p>Chỉ giữ 2 kỹ năng trọng tâm: Listening và Reading. Chọn chế độ làm bài và chủ đề mô phỏng trước khi bắt đầu.</p>
           </div>
 
-          <div className="toeic-skill-grid">
-            {config.skills.map((skill) => (
-              <button
-                key={skill.key}
-                className={`toeic-skill-card ${selectedSkills.includes(skill.key) ? 'active' : ''}`}
-                onClick={() => toggleSkill(skill.key)}
-              >
-                <div className="card-title-row align-start">
-                  <div>
-                    <p className="section-kicker">{skill.official_label}</p>
-                    <h4>{skill.label}</h4>
-                  </div>
-                  <span className="pill pastel-blue">{selectedSkills.includes(skill.key) ? 'Đã chọn' : 'Bỏ chọn'}</span>
-                </div>
-                <p>{skill.description}</p>
-                <p className="subtle">{skill.question_count} câu chuẩn • {skill.recommended_minutes} phút chuẩn</p>
-              </button>
-            ))}
+          <div className="toeic-room-presets">
+            <button
+              className={`toeic-track-btn ${preset === 'listening' ? 'active' : ''}`}
+              onClick={() => setPresetSkills(PRESET_MAP.listening)}
+            >
+              <strong>Listening</strong>
+              <small>Nghe hội thoại, thông báo, phản hồi nhanh</small>
+            </button>
+            <button
+              className={`toeic-track-btn ${preset === 'reading' ? 'active' : ''}`}
+              onClick={() => setPresetSkills(PRESET_MAP.reading)}
+            >
+              <strong>Reading</strong>
+              <small>Part 5/6/7 với ngữ cảnh công việc</small>
+            </button>
+            <button
+              className={`toeic-track-btn ${preset === 'lr' || !preset ? 'active' : ''}`}
+              onClick={() => setPresetSkills(PRESET_MAP.lr)}
+            >
+              <strong>Listening + Reading</strong>
+              <small>Thi kết hợp cả 2 kỹ năng</small>
+            </button>
           </div>
 
-          <div className="toeic-theme-row">
-            <p className="section-kicker">Theme bài tập</p>
-            <div className="toeic-theme-chips">
+          <div className="toeic-room-summary">
+            {selectedSkills.map((skillKey) => {
+              const skill = configSkillMap.get(skillKey);
+              if (!skill) return null;
+              return (
+                <article key={skill.key} className="toeic-room-summary-card">
+                  <p className="section-kicker">{skill.official_label}</p>
+                  <h4>{skill.label}</h4>
+                  <p>{skill.description}</p>
+                  <small>{skill.question_count} câu chuẩn • {skill.recommended_minutes} phút chuẩn</small>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="toeic-room-theme">
+            <p className="section-kicker">Chủ đề mô phỏng</p>
+            <div className="toeic-room-theme-grid">
               {config.themes.map((theme) => (
                 <button
                   key={theme.key}
-                  className={`topic-chip ${selectedTheme === theme.key ? 'active' : ''}`}
+                  className={`toeic-theme-card ${selectedTheme === theme.key ? 'active' : ''}`}
                   onClick={() => setSelectedTheme(theme.key)}
                 >
-                  {theme.label}
+                  <strong>{theme.label}</strong>
+                  <small>{theme.description}</small>
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="toeic-exam-cta">
-            <span className="subtle">Đã chọn {selectedSkills.length} kỹ năng</span>
-            <button className="primary-btn" onClick={startExam} disabled={!selectedSkills.length}>Bắt đầu bài làm</button>
+          <div className="toeic-room-start">
+            <p className="subtle">
+              Chế độ hiện tại: {selectedSkills.length === 2 ? 'Listening + Reading' : selectedSkills[0] || 'N/A'} • Theme: {config.themes.find((theme) => theme.key === selectedTheme)?.label || selectedTheme}
+            </p>
+            <button className="primary-btn" onClick={startExam} disabled={!selectedSkills.length}>
+              Bắt đầu làm bài
+            </button>
           </div>
         </section>
       </div>
@@ -369,24 +380,24 @@ export default function ToeicExamPage() {
   }
 
   return (
-    <div className="toeic-exam-page">
-      <section className="toeic-exam-shell">
-        <div className="toeic-exam-topbar">
+    <div className="toeic-room-page">
+      <section className="toeic-room-shell">
+        <div className="toeic-room-header">
           <div>
             <p className="section-kicker">Theme: {session.theme_label}</p>
-            <h3>TOEIC Official Practice Room</h3>
+            <h3>TOEIC L&R Exam Session</h3>
           </div>
-          <div className="toeic-exam-metrics">
+          <div className="toeic-room-metrics">
             <span className="pill exam-pill">{answeredCount}/{totalQuestionCount} answered</span>
-            <span className="pill exam-pill">{formatDuration(remainingSeconds)}</span>
+            <span className={`pill exam-pill ${remainingSeconds < 300 ? 'danger-timer' : ''}`}>{formatDuration(remainingSeconds)}</span>
           </div>
         </div>
 
-        <div className="toeic-exam-sections">
+        <div className="toeic-room-section-tabs">
           {session.sections.map((section, sectionIndex) => (
             <button
               key={section.skill_key}
-              className={`toeic-exam-section-btn ${sectionIndex === currentSectionIndex ? 'active' : ''}`}
+              className={`toeic-room-section-tab ${sectionIndex === currentSectionIndex ? 'active' : ''}`}
               onClick={() => goToQuestion(sectionIndex, 0)}
             >
               {section.skill_label}
@@ -394,20 +405,21 @@ export default function ToeicExamPage() {
           ))}
         </div>
 
-        <div className="toeic-exam-layout">
-          <aside className="toeic-exam-nav-card">
-            <p className="section-kicker">Question Map</p>
+        <div className="toeic-room-layout">
+          <aside className="toeic-room-map">
+            <p className="section-kicker">Question map</p>
             {session.sections.map((section, sectionIndex) => (
-              <div key={section.skill_key} className="toeic-exam-nav-section">
+              <div key={section.skill_key} className="toeic-room-map-group">
                 <strong>{section.skill_label}</strong>
-                <div className="toeic-exam-question-grid">
+                <div className="toeic-room-map-grid">
                   {section.questions.map((question, questionIndex) => {
                     const key = `${section.skill_key}|${question.id}`;
                     const answered = answers[key] !== undefined && String(answers[key]).trim() !== '';
+                    const isCurrent = sectionIndex === currentSectionIndex && questionIndex === currentQuestionIndex;
                     return (
                       <button
                         key={question.id}
-                        className={`jump-pill ${answered ? 'answered' : ''}`}
+                        className={`jump-pill ${answered ? 'answered' : ''} ${isCurrent ? 'current' : ''}`}
                         onClick={() => goToQuestion(sectionIndex, questionIndex)}
                       >
                         {questionIndex + 1}
@@ -419,7 +431,7 @@ export default function ToeicExamPage() {
             ))}
           </aside>
 
-          <article className="toeic-exam-question-card">
+          <article className="toeic-room-question-card">
             {currentQuestion ? (
               <>
                 <div className="card-title-row">
@@ -427,44 +439,32 @@ export default function ToeicExamPage() {
                   <span className="pill pastel-green">Q{currentQuestionIndex + 1}</span>
                 </div>
 
+                <h4>{currentQuestion.prompt}</h4>
+
                 {currentQuestion.audio_script ? (
-                  <button className="secondary-btn" onClick={() => speakPrompt(currentQuestion.audio_script)}>
-                    🔊 Nghe audio mẫu
+                  <button className="toeic-audio-btn" onClick={() => speakPrompt(currentQuestion.audio_script)}>
+                    Nghe đoạn audio
                   </button>
                 ) : null}
 
-                <h4>{currentQuestion.prompt}</h4>
+                <div className="toeic-option-list">
+                  {currentQuestion.options.map((option, optionIndex) => {
+                    const key = `${currentSection.skill_key}|${currentQuestion.id}`;
+                    const selected = Number(answers[key]) === optionIndex;
+                    return (
+                      <button
+                        key={`${currentQuestion.id}-${optionIndex}`}
+                        className={`option-card option-card-rich ${selected ? 'selected' : ''}`}
+                        onClick={() => handleAnswerChange(currentSection.skill_key, currentQuestion.id, optionIndex)}
+                      >
+                        <span className="option-index">{['A', 'B', 'C', 'D'][optionIndex]}</span>
+                        <span>{option}</span>
+                      </button>
+                    );
+                  })}
+                </div>
 
-                {currentQuestion.kind === 'mcq' ? (
-                  <div className="stack-list">
-                    {currentQuestion.options.map((option, optionIndex) => {
-                      const key = `${currentSection.skill_key}|${currentQuestion.id}`;
-                      const selected = Number(answers[key]) === optionIndex;
-                      return (
-                        <button
-                          key={option}
-                          className={`option-card option-card-rich ${selected ? 'selected' : ''}`}
-                          onClick={() => handleAnswerChange(currentSection.skill_key, currentQuestion.id, optionIndex)}
-                        >
-                          <span className="option-index">{['A', 'B', 'C', 'D'][optionIndex]}</span>
-                          <span>{option}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="stack-list">
-                    <p className="subtle">Viết hoặc nhập câu trả lời cho phần {currentQuestion.task}. Hệ thống demo sẽ chấm theo độ dài + từ khóa.</p>
-                    <textarea
-                      className="toeic-open-answer"
-                      value={answers[`${currentSection.skill_key}|${currentQuestion.id}`] || ''}
-                      onChange={(event) => handleAnswerChange(currentSection.skill_key, currentQuestion.id, event.target.value)}
-                      placeholder="Nhập câu trả lời ở đây..."
-                    />
-                  </div>
-                )}
-
-                <div className="toeic-exam-actions">
+                <div className="toeic-room-actions">
                   <button className="ghost-btn" onClick={previousQuestion}>Câu trước</button>
                   <button className="secondary-btn" onClick={nextQuestion}>Câu tiếp</button>
                   <button className="primary-btn" onClick={submitExam} disabled={submitting}>
@@ -477,7 +477,7 @@ export default function ToeicExamPage() {
         </div>
 
         {result ? (
-          <section className="toeic-exam-result">
+          <section className="toeic-room-result">
             <div className="section-heading">
               <div>
                 <p className="section-kicker">Kết quả</p>
@@ -497,7 +497,7 @@ export default function ToeicExamPage() {
             <div className="hero-actions">
               <button className="ghost-btn" onClick={() => navigate('/toeic')}>Về TOEIC</button>
               <button className="primary-btn" onClick={() => navigate(`/toeic/exam/${getPresetKeyFromSkills(selectedSkills)}`)}>
-                Thi lại với combo khác
+                Thi lại
               </button>
             </div>
           </section>
