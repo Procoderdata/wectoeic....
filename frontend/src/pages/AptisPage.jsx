@@ -115,7 +115,7 @@ export default function AptisPage() {
     <div className="aptis-page">
       <section className="aptis-header aptis-hero-enhanced">
         <div>
-          <span className="pill pastel-green">Inspired by Edubit course pages</span>
+          <span className="pill pastel-green">Aptis Course & Mock Test Hub</span>
           <h2>Aptis course platform: card khóa học, lesson panel, mock test online</h2>
           <p>
             Trang tổng quan chỉ giữ danh sách khóa học và khu test online. Chi tiết khóa học được tách riêng để giao diện gọn hơn.
@@ -195,7 +195,7 @@ export default function AptisPage() {
                 <div className="course-body">
                   <div className="course-top-meta">
                     <p className="meta-line">{course.category}</p>
-                    <span className="course-teacher">👩‍🏫 {course.teacher}</span>
+                    <span className="course-teacher">Instructor: {course.teacher}</span>
                   </div>
                   <h3>{course.title}</h3>
                   <div className="course-inline-meta">

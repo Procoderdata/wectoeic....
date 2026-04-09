@@ -1,12 +1,107 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
+import json
+import os
+import re
+import secrets
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from dotenv import load_dotenv
+from fastapi import FastAPI, HTTPException, Header, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+BACKEND_DIR = Path(__file__).resolve().parent
+load_dotenv(BACKEND_DIR / ".env")
+load_dotenv(BACKEND_DIR / ".env.local")
+
+try:
+    from db_store import (
+        DEFAULT_PROGRESS_USER_ID,
+        check_connection as pg_check_connection,
+        create_user as pg_create_user,
+        delete_full_test_resume as pg_delete_full_test_resume,
+        get_admin_student_activity as pg_get_admin_student_activity,
+        get_admin_student_summary as pg_get_admin_student_summary,
+        get_full_test_resume as pg_get_full_test_resume,
+        get_leaderboard as pg_get_leaderboard,
+        get_latest_full_test_resume as pg_get_latest_full_test_resume,
+        get_progress_snapshot as pg_get_progress_snapshot,
+        get_recent_activities as pg_get_recent_activities,
+        get_user_by_email as pg_get_user_by_email,
+        get_user_by_id as pg_get_user_by_id,
+        get_user_by_username as pg_get_user_by_username,
+        init_database as pg_init_database,
+        is_enabled as pg_is_enabled,
+        record_activity as pg_record_activity,
+        remove_saved_word as pg_remove_saved_word,
+        save_full_test_resume as pg_save_full_test_resume,
+        save_word as pg_save_word,
+    )
+except ModuleNotFoundError:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.append(current_dir)
+    from db_store import (
+        DEFAULT_PROGRESS_USER_ID,
+        check_connection as pg_check_connection,
+        create_user as pg_create_user,
+        delete_full_test_resume as pg_delete_full_test_resume,
+        get_admin_student_activity as pg_get_admin_student_activity,
+        get_admin_student_summary as pg_get_admin_student_summary,
+        get_full_test_resume as pg_get_full_test_resume,
+        get_leaderboard as pg_get_leaderboard,
+        get_latest_full_test_resume as pg_get_latest_full_test_resume,
+        get_progress_snapshot as pg_get_progress_snapshot,
+        get_recent_activities as pg_get_recent_activities,
+        get_user_by_email as pg_get_user_by_email,
+        get_user_by_id as pg_get_user_by_id,
+        get_user_by_username as pg_get_user_by_username,
+        init_database as pg_init_database,
+        is_enabled as pg_is_enabled,
+        record_activity as pg_record_activity,
+        remove_saved_word as pg_remove_saved_word,
+        save_full_test_resume as pg_save_full_test_resume,
+        save_word as pg_save_word,
+    )
+
+try:
+    from admin_store import (
+        delete_full_test_pack as admin_delete_full_test_pack,
+        get_exam_document as admin_get_exam_document,
+        export_bundle as admin_export_bundle,
+        get_admin_state as admin_get_state,
+        get_exam_themes_catalog as admin_get_exam_themes_catalog,
+        get_full_test_catalog as admin_get_full_test_catalog,
+        get_question_bank_catalog as admin_get_question_bank_catalog,
+        import_bundle as admin_import_bundle,
+        upsert_full_test_pack as admin_upsert_full_test_pack,
+    )
+except ModuleNotFoundError:
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir not in sys.path:
+        sys.path.append(current_dir)
+    from admin_store import (
+        delete_full_test_pack as admin_delete_full_test_pack,
+        get_exam_document as admin_get_exam_document,
+        export_bundle as admin_export_bundle,
+        get_admin_state as admin_get_state,
+        get_exam_themes_catalog as admin_get_exam_themes_catalog,
+        get_full_test_catalog as admin_get_full_test_catalog,
+        get_question_bank_catalog as admin_get_question_bank_catalog,
+        import_bundle as admin_import_bundle,
+        upsert_full_test_pack as admin_upsert_full_test_pack,
+    )
 
 app = FastAPI(title="Toeic + Aptis Academy API", version="1.0.0")
 
@@ -21,12 +116,12 @@ app.add_middleware(
 
 SITE_OVERVIEW = {
     "brand": "Bloom English House",
-    "tagline": "Nhẹ nhàng, cute Hàn Quốc, nhưng học là vào form thi thật.",
+    "tagline": "Nền tảng luyện thi TOEIC & Aptis với trải nghiệm học tập tập trung và thực dụng.",
     "hero": {
         "title": "Một trang học cho cả TOEIC và Aptis",
         "subtitle": (
-            "Lấy tinh thần từ Charnishere cho TOEIC và giao diện khóa học từ Edubit "
-            "để làm một website học, xem video, test online, flashcard và hồ sơ tiến độ."
+            "Tích hợp bài học, ngân hàng câu hỏi, full test mô phỏng và theo dõi tiến độ "
+            "trên cùng một hệ thống cho học viên tự học và giảng viên theo dõi."
         ),
         "cta_primary": "Vào khu TOEIC",
         "cta_secondary": "Xem Aptis",
@@ -37,7 +132,7 @@ SITE_OVERVIEW = {
             "label": "TOEIC",
             "description": "8 tính năng học từ vựng, ngữ pháp, profile và mini game.",
             "accent": "sunrise",
-            "stats": ["12 bộ từ vựng", "450+ từ khóa", "full dashboard xinh xắn"],
+            "stats": ["12 bộ từ vựng", "450+ từ khóa", "dashboard học tập chuyên sâu"],
         },
         {
             "slug": "aptis",
@@ -49,7 +144,7 @@ SITE_OVERVIEW = {
     ],
     "toeic_features": [
         {"key": "search", "title": "Tra từ thông minh", "icon": "Sparkles", "description": "Tìm từ và hiện nghĩa + câu đã xuất hiện trong đề."},
-        {"key": "flashcard", "title": "Flashcard", "icon": "Layers", "description": "Thẻ học pastel, lật mặt, lưu từ và đi theo chủ đề."},
+        {"key": "flashcard", "title": "Flashcard", "icon": "Layers", "description": "Thẻ học hai mặt, lưu từ quan trọng và ôn theo chủ đề."},
         {"key": "quiz", "title": "Quiz", "icon": "BadgeCheck", "description": "Làm trắc nghiệm nghĩa từ như phong cách Charnishere."},
         {"key": "listening", "title": "Nghe phát âm", "icon": "Headphones", "description": "Nghe bot đọc và đoán lại từ."},
         {"key": "typing", "title": "Typing", "icon": "Keyboard", "description": "Gõ lại từ theo nghĩa để nhớ lâu."},
@@ -410,126 +505,7 @@ GRAMMAR_TOPICS = [
 ]
 
 
-TOEIC_FULL_TEST_PACKS = [
-    {
-        "id": "ets-2026-test-1",
-        "series": "ETS 2026",
-        "title": "Test 1",
-        "questions": 200,
-        "duration_minutes": 120,
-        "status": "Chua lam",
-        "focus": "Listening + Reading full format",
-        "parts": [
-            {"part": "Part 1", "count": 6, "type": "Photos"},
-            {"part": "Part 2", "count": 25, "type": "Question-Response"},
-            {"part": "Part 3", "count": 39, "type": "Conversations"},
-            {"part": "Part 4", "count": 30, "type": "Talks"},
-            {"part": "Part 5", "count": 30, "type": "Incomplete Sentences"},
-            {"part": "Part 6", "count": 16, "type": "Text Completion"},
-            {"part": "Part 7", "count": 54, "type": "Reading Comprehension"},
-        ],
-    },
-    {
-        "id": "ets-2026-test-2",
-        "series": "ETS 2026",
-        "title": "Test 2",
-        "questions": 200,
-        "duration_minutes": 120,
-        "status": "Dang hoc",
-        "focus": "Part 5-7 business reading",
-        "parts": [
-            {"part": "Part 1", "count": 6, "type": "Photos"},
-            {"part": "Part 2", "count": 25, "type": "Question-Response"},
-            {"part": "Part 3", "count": 39, "type": "Conversations"},
-            {"part": "Part 4", "count": 30, "type": "Talks"},
-            {"part": "Part 5", "count": 30, "type": "Incomplete Sentences"},
-            {"part": "Part 6", "count": 16, "type": "Text Completion"},
-            {"part": "Part 7", "count": 54, "type": "Reading Comprehension"},
-        ],
-    },
-    {
-        "id": "ets-2024-test-1",
-        "series": "ETS 2024",
-        "title": "Test 1",
-        "questions": 200,
-        "duration_minutes": 120,
-        "status": "Chua lam",
-        "focus": "Classic ETS pacing",
-        "parts": [
-            {"part": "Part 1", "count": 6, "type": "Photos"},
-            {"part": "Part 2", "count": 25, "type": "Question-Response"},
-            {"part": "Part 3", "count": 39, "type": "Conversations"},
-            {"part": "Part 4", "count": 30, "type": "Talks"},
-            {"part": "Part 5", "count": 30, "type": "Incomplete Sentences"},
-            {"part": "Part 6", "count": 16, "type": "Text Completion"},
-            {"part": "Part 7", "count": 54, "type": "Reading Comprehension"},
-        ],
-    },
-    {
-        "id": "ets-2024-test-2",
-        "series": "ETS 2024",
-        "title": "Test 2",
-        "questions": 200,
-        "duration_minutes": 120,
-        "status": "Da lam",
-        "focus": "Mixed grammar traps",
-        "parts": [
-            {"part": "Part 1", "count": 6, "type": "Photos"},
-            {"part": "Part 2", "count": 25, "type": "Question-Response"},
-            {"part": "Part 3", "count": 39, "type": "Conversations"},
-            {"part": "Part 4", "count": 30, "type": "Talks"},
-            {"part": "Part 5", "count": 30, "type": "Incomplete Sentences"},
-            {"part": "Part 6", "count": 16, "type": "Text Completion"},
-            {"part": "Part 7", "count": 54, "type": "Reading Comprehension"},
-        ],
-    },
-    {
-        "id": "ets-2023-test-1",
-        "series": "ETS 2023",
-        "title": "Test 1",
-        "questions": 200,
-        "duration_minutes": 120,
-        "status": "Chua lam",
-        "focus": "Reading inference heavy",
-        "parts": [
-            {"part": "Part 1", "count": 6, "type": "Photos"},
-            {"part": "Part 2", "count": 25, "type": "Question-Response"},
-            {"part": "Part 3", "count": 39, "type": "Conversations"},
-            {"part": "Part 4", "count": 30, "type": "Talks"},
-            {"part": "Part 5", "count": 30, "type": "Incomplete Sentences"},
-            {"part": "Part 6", "count": 16, "type": "Text Completion"},
-            {"part": "Part 7", "count": 54, "type": "Reading Comprehension"},
-        ],
-    },
-    {
-        "id": "sinagong-850-1",
-        "series": "SINAGONG 850",
-        "title": "Set 1",
-        "questions": 100,
-        "duration_minutes": 60,
-        "status": "Dang hoc",
-        "focus": "High-frequency vocabulary",
-        "parts": [
-            {"part": "Part 5", "count": 40, "type": "Grammar + Vocab"},
-            {"part": "Part 6", "count": 20, "type": "Text Completion"},
-            {"part": "Part 7", "count": 40, "type": "Reading Comprehension"},
-        ],
-    },
-    {
-        "id": "sinagong-950-1",
-        "series": "SINAGONG 950",
-        "title": "Set 1",
-        "questions": 100,
-        "duration_minutes": 60,
-        "status": "Chua lam",
-        "focus": "Advanced reading speed",
-        "parts": [
-            {"part": "Part 5", "count": 40, "type": "Grammar + Vocab"},
-            {"part": "Part 6", "count": 20, "type": "Text Completion"},
-            {"part": "Part 7", "count": 40, "type": "Reading Comprehension"},
-        ],
-    },
-]
+TOEIC_FULL_TEST_PACKS = []
 
 
 TOEIC_EXAM_THEMES = [
@@ -554,22 +530,6 @@ TOEIC_EXAM_SKILLS = [
         "recommended_minutes": 75,
         "question_count": 100,
         "description": "Sentence completion, text completion, reading comprehension",
-    },
-    {
-        "key": "speaking",
-        "label": "Speaking",
-        "official_label": "TOEIC Speaking",
-        "recommended_minutes": 20,
-        "question_count": 11,
-        "description": "Read aloud, describe picture, respond, propose solution, opinion",
-    },
-    {
-        "key": "writing",
-        "label": "Writing",
-        "official_label": "TOEIC Writing",
-        "recommended_minutes": 60,
-        "question_count": 8,
-        "description": "Sentence writing, email response, opinion essay",
     },
 ]
 
@@ -1246,6 +1206,40 @@ class TestSubmission(BaseModel):
 class FullTestLaunchRequest(BaseModel):
     mode: str = "exam"
     user_id: str = "demo-user"
+    selected_parts: list[str] = Field(default_factory=list)
+
+
+class FullTestSessionSubmitAnswer(BaseModel):
+    question_id: str
+    answer_key: str = ""
+
+
+class FullTestSessionSubmitRequest(BaseModel):
+    answers: list[FullTestSessionSubmitAnswer] = Field(default_factory=list)
+
+
+class FullTestSessionSaveRequest(BaseModel):
+    user_id: str = "demo-user"
+    current_group_index: int = 0
+    answers: list[FullTestSessionSubmitAnswer] = Field(default_factory=list)
+    notes: dict[str, str] = Field(default_factory=dict)
+
+
+class AdminToeicPartRequest(BaseModel):
+    part: str
+    count: int = 0
+    type: str
+
+
+class AdminToeicPackRequest(BaseModel):
+    id: Optional[str] = None
+    series: str
+    title: str
+    questions: int = 0
+    duration_minutes: int = 120
+    status: str = "Chua lam"
+    focus: str = ""
+    parts: list[AdminToeicPartRequest] = Field(default_factory=list)
 
 
 class GrammarAttemptRecord(BaseModel):
@@ -1284,6 +1278,508 @@ class ToeicReadingFlashcardReviewRequest(BaseModel):
     quality: int = 3
 
 
+class AuthRegisterRequest(BaseModel):
+    email: str
+    username: str = Field(..., min_length=3, max_length=100)
+    password: str = Field(..., min_length=8, max_length=100)
+    full_name: Optional[str] = None
+
+
+class AuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class GoogleAuthRequest(BaseModel):
+    credential: str = Field(..., min_length=20)
+
+
+class AdminAuthLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AuthRefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class AuthLogoutRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+
+AUTH_ACCESS_TOKEN_TTL_DAYS = int(os.getenv("AUTH_ACCESS_TOKEN_TTL_DAYS", "365"))
+AUTH_REFRESH_TOKEN_TTL_DAYS = int(os.getenv("AUTH_REFRESH_TOKEN_TTL_DAYS", "365"))
+AUTH_PASSWORD_ITERATIONS = int(os.getenv("AUTH_PASSWORD_ITERATIONS", "120000"))
+AUTH_TOKEN_SECRET = os.getenv("AUTH_TOKEN_SECRET") or os.getenv("SECRET_KEY") or "bloom-auth-secret-change-this"
+ADMIN_ACCESS_TOKEN_TTL_DAYS = int(os.getenv("ADMIN_ACCESS_TOKEN_TTL_DAYS", "30"))
+ADMIN_AUTH_EMAIL_RAW = os.getenv("ADMIN_EMAIL", "admin@webtoeic.local")
+ADMIN_AUTH_PASSWORD = os.getenv("ADMIN_PASSWORD", "ToeicAdmin@2026")
+ADMIN_AUTH_NAME = os.getenv("ADMIN_NAME", "TOEIC Admin")
+AUTH_GOOGLE_CLIENT_IDS = [
+    item.strip()
+    for item in (
+        os.getenv("AUTH_GOOGLE_CLIENT_IDS")
+        or os.getenv("GOOGLE_CLIENT_ID")
+        or ""
+    ).split(",")
+    if item.strip()
+]
+AUTH_GOOGLE_TOKENINFO_URL = "https://oauth2.googleapis.com/tokeninfo"
+
+# In-memory user store (demo mode).
+AUTH_USERS_BY_EMAIL: dict[str, dict[str, Any]] = {}
+AUTH_USERS_BY_ID: dict[str, dict[str, Any]] = {}
+
+
+def _normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def _normalize_username(raw: str) -> str:
+    candidate = re.sub(r"[^a-zA-Z0-9_]+", "_", (raw or "").strip().lower()).strip("_")
+    if not candidate:
+        candidate = "user"
+    if candidate[0].isdigit():
+        candidate = f"u_{candidate}"
+    return candidate[:60]
+
+
+def _username_exists(username: str) -> bool:
+    if _pg_ready():
+        return bool(pg_get_user_by_username(username))
+    return any(user.get("username", "").lower() == username.lower() for user in AUTH_USERS_BY_ID.values())
+
+
+def _build_unique_username(seed: str) -> str:
+    base = _normalize_username(seed)
+    if not _username_exists(base):
+        return base
+
+    suffix = 2
+    while suffix < 10000:
+        candidate = _normalize_username(f"{base}_{suffix}")
+        if not _username_exists(candidate):
+            return candidate
+        suffix += 1
+    return f"user_{uuid4().hex[:8]}"
+
+
+def _verify_google_credential(credential: str) -> dict[str, Any]:
+    token = (credential or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="Missing Google credential")
+
+    query = urllib.parse.urlencode({"id_token": token})
+    url = f"{AUTH_GOOGLE_TOKENINFO_URL}?{query}"
+    try:
+        with urllib.request.urlopen(url, timeout=8) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=503, detail=f"Google verification unavailable: {exc.reason}")
+
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=502, detail="Invalid Google verification payload")
+
+    if payload.get("error_description"):
+        raise HTTPException(status_code=401, detail=payload["error_description"])
+
+    audience = str(payload.get("aud") or "").strip()
+    if AUTH_GOOGLE_CLIENT_IDS and audience not in AUTH_GOOGLE_CLIENT_IDS:
+        raise HTTPException(status_code=401, detail="Google token audience mismatch")
+    if not AUTH_GOOGLE_CLIENT_IDS:
+        raise HTTPException(status_code=500, detail="Google OAuth is not configured on backend")
+
+    issuer = str(payload.get("iss") or "").strip()
+    if issuer not in {"accounts.google.com", "https://accounts.google.com"}:
+        raise HTTPException(status_code=401, detail="Google token issuer mismatch")
+
+    try:
+        exp = int(payload.get("exp") or 0)
+    except (TypeError, ValueError):
+        exp = 0
+    if exp <= _utc_ts():
+        raise HTTPException(status_code=401, detail="Google token expired")
+
+    email = _normalize_email(str(payload.get("email") or ""))
+    email_verified = str(payload.get("email_verified") or "").lower()
+    if not email or email_verified not in {"true", "1"}:
+        raise HTTPException(status_code=401, detail="Google account email is not verified")
+
+    return {
+        "sub": str(payload.get("sub") or ""),
+        "email": email,
+        "name": str(payload.get("name") or "").strip(),
+        "given_name": str(payload.get("given_name") or "").strip(),
+    }
+
+
+def _find_or_create_google_user(claims: dict[str, Any]) -> dict[str, Any]:
+    email = _normalize_email(claims.get("email", ""))
+    if not email:
+        raise HTTPException(status_code=400, detail="Google account missing email")
+
+    existing = pg_get_user_by_email(email) if _pg_ready() else AUTH_USERS_BY_EMAIL.get(email)
+    if existing:
+        return existing
+
+    display_name = claims.get("name") or claims.get("given_name") or ""
+    email_local = email.split("@", 1)[0] if "@" in email else email
+    username_seed = display_name or email_local or "google_user"
+    username = _build_unique_username(username_seed)
+    random_password = secrets.token_urlsafe(24)
+    user_payload = {
+        "id": f"user-{uuid4().hex[:12]}",
+        "email": email,
+        "username": username,
+        "full_name": display_name or None,
+        "password_hash": _hash_password(random_password),
+        "created_at": datetime.utcnow().isoformat(),
+    }
+
+    if _pg_ready():
+        try:
+            return pg_create_user(user_payload)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to create Google user in postgres: {exc}")
+
+    AUTH_USERS_BY_EMAIL[email] = user_payload
+    AUTH_USERS_BY_ID[user_payload["id"]] = user_payload
+    return user_payload
+
+
+def _hash_password(password: str, salt_hex: Optional[str] = None) -> str:
+    salt = bytes.fromhex(salt_hex) if salt_hex else secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        AUTH_PASSWORD_ITERATIONS,
+    )
+    return f"{salt.hex()}${digest.hex()}"
+
+
+def _verify_password(password: str, hashed_password: str) -> bool:
+    try:
+        salt_hex, expected_digest = hashed_password.split("$", 1)
+    except ValueError:
+        return False
+    actual_hash = _hash_password(password, salt_hex)
+    _, actual_digest = actual_hash.split("$", 1)
+    return hmac.compare_digest(actual_digest, expected_digest)
+
+
+ADMIN_AUTH_USER = {
+    "id": "admin-webtoeic",
+    "email": _normalize_email(ADMIN_AUTH_EMAIL_RAW),
+    "display_name": ADMIN_AUTH_NAME.strip() or "TOEIC Admin",
+    "password_hash": _hash_password(ADMIN_AUTH_PASSWORD),
+    "created_at": datetime.utcnow().isoformat(),
+}
+
+
+def _utc_ts() -> int:
+    return int(datetime.utcnow().timestamp())
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def _b64url_decode(encoded: str) -> bytes:
+    padding = "=" * (-len(encoded) % 4)
+    return base64.urlsafe_b64decode(f"{encoded}{padding}")
+
+
+def _sign_payload(payload_b64: str) -> str:
+    digest = hmac.new(
+        AUTH_TOKEN_SECRET.encode("utf-8"),
+        payload_b64.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    return _b64url_encode(digest)
+
+
+def _encode_auth_token(payload: dict[str, Any]) -> str:
+    payload_raw = json.dumps(
+        payload,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    payload_b64 = _b64url_encode(payload_raw)
+    signature = _sign_payload(payload_b64)
+    return f"{payload_b64}.{signature}"
+
+
+def _decode_auth_token(token: str, expected_type: str) -> dict[str, Any]:
+    try:
+        payload_b64, signature = token.split(".", 1)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    expected_signature = _sign_payload(payload_b64)
+    if not hmac.compare_digest(signature, expected_signature):
+        raise HTTPException(status_code=401, detail="Invalid token signature")
+
+    try:
+        payload = json.loads(_b64url_decode(payload_b64).decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    token_type = payload.get("type")
+    if token_type != expected_type:
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    exp = payload.get("exp")
+    if not isinstance(exp, int) or exp <= _utc_ts():
+        raise HTTPException(status_code=401, detail="Token expired")
+
+    user_id = payload.get("sub")
+    if not isinstance(user_id, str) or not user_id:
+        raise HTTPException(status_code=401, detail="Invalid token subject")
+
+    return payload
+
+
+def _create_auth_tokens(user: dict[str, Any]) -> dict[str, Any]:
+    now_ts = _utc_ts()
+    access_exp = now_ts + AUTH_ACCESS_TOKEN_TTL_DAYS * 24 * 60 * 60
+    refresh_exp = now_ts + AUTH_REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60
+
+    common_claims = {
+        "sub": user["id"],
+        "email": user["email"],
+        "username": user["username"],
+        "iat": now_ts,
+    }
+
+    access_token = _encode_auth_token(
+        {
+            **common_claims,
+            "type": "access",
+            "exp": access_exp,
+            "jti": secrets.token_hex(8),
+        }
+    )
+    refresh_token = _encode_auth_token(
+        {
+            **common_claims,
+            "type": "refresh",
+            "exp": refresh_exp,
+            "jti": secrets.token_hex(10),
+        }
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": AUTH_ACCESS_TOKEN_TTL_DAYS * 24 * 60 * 60,
+    }
+
+
+def _parse_bearer_token(authorization_header: Optional[str]) -> Optional[str]:
+    if not authorization_header or not isinstance(authorization_header, str):
+        return None
+    prefix = "Bearer "
+    if not authorization_header.startswith(prefix):
+        return None
+    token = authorization_header[len(prefix):].strip()
+    return token or None
+
+
+def _user_payload(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "username": user["username"],
+        "full_name": user.get("full_name"),
+        "created_at": user["created_at"],
+    }
+
+
+def _admin_user_payload(user: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
+        "created_at": user["created_at"],
+    }
+
+
+def _get_current_auth_user(authorization_header: Optional[str]) -> dict[str, Any]:
+    token = _parse_bearer_token(authorization_header)
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    token_payload = _decode_auth_token(token, expected_type="access")
+
+    user = pg_get_user_by_id(token_payload["sub"]) if _pg_ready() else AUTH_USERS_BY_ID.get(token_payload["sub"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
+
+
+def _create_admin_auth_tokens(user: dict[str, Any]) -> dict[str, Any]:
+    now_ts = _utc_ts()
+    access_expires_in = ADMIN_ACCESS_TOKEN_TTL_DAYS * 24 * 60 * 60
+    access_token = _encode_auth_token(
+        {
+            "sub": user["id"],
+            "email": user["email"],
+            "display_name": user["display_name"],
+            "type": "admin_access",
+            "iat": now_ts,
+            "exp": now_ts + access_expires_in,
+            "jti": secrets.token_hex(12),
+        }
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "expires_in": access_expires_in,
+    }
+
+
+def _get_current_admin_user(authorization_header: Optional[str]) -> dict[str, Any]:
+    token = _parse_bearer_token(authorization_header)
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    token_payload = _decode_auth_token(token, expected_type="admin_access")
+    if token_payload.get("sub") != ADMIN_AUTH_USER["id"]:
+        raise HTTPException(status_code=401, detail="Admin not found")
+    if _normalize_email(token_payload.get("email", "")) != ADMIN_AUTH_USER["email"]:
+        raise HTTPException(status_code=401, detail="Admin token mismatch")
+    return ADMIN_AUTH_USER
+
+
+def _seed_demo_auth_users() -> None:
+    demo_accounts = [
+        {
+            "id": "user-demo",
+            "email": "demo@bloomenglish.local",
+            "username": "demo_user",
+            "full_name": "Demo Student",
+            "password": "demo12345",
+        },
+        {
+            "id": "user-tester",
+            "email": "tester@bloomprep.local",
+            "username": "toeic_aptis_tester",
+            "full_name": "Toeic Aptis Tester",
+            "password": "Bloom@2026",
+        },
+    ]
+
+    for account in demo_accounts:
+        normalized = _normalize_email(account["email"])
+        if normalized in AUTH_USERS_BY_EMAIL:
+            continue
+
+        user = {
+            "id": account["id"],
+            "email": account["email"],
+            "username": account["username"],
+            "full_name": account["full_name"],
+            "password_hash": _hash_password(account["password"]),
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        AUTH_USERS_BY_EMAIL[normalized] = user
+        AUTH_USERS_BY_ID[user["id"]] = user
+
+
+_seed_demo_auth_users()
+
+PG_BOOTSTRAP_STATE: dict[str, Any] = {
+    "enabled": pg_is_enabled(),
+    "ready": False,
+    "detail": "postgres disabled",
+}
+
+if pg_is_enabled():
+    try:
+        PG_BOOTSTRAP_STATE = pg_init_database(seed_users=list(AUTH_USERS_BY_ID.values()))
+    except Exception as exc:
+        PG_BOOTSTRAP_STATE = {
+            "enabled": True,
+            "ready": False,
+            "detail": f"postgres init failed: {exc}",
+        }
+
+
+def _pg_ready() -> bool:
+    return bool(PG_BOOTSTRAP_STATE.get("enabled")) and bool(PG_BOOTSTRAP_STATE.get("ready"))
+
+
+def _resolve_progress_user_id(authorization_header: Optional[str]) -> str:
+    token = _parse_bearer_token(authorization_header)
+    if not token:
+        return DEFAULT_PROGRESS_USER_ID
+    try:
+        payload = _decode_auth_token(token, expected_type="access")
+    except HTTPException:
+        return DEFAULT_PROGRESS_USER_ID
+    return payload.get("sub") or DEFAULT_PROGRESS_USER_ID
+
+
+def _snapshot_for_user(user_id: str) -> dict[str, Any]:
+    if _pg_ready():
+        try:
+            return pg_get_progress_snapshot(user_id)
+        except Exception:
+            pass
+    return USER_PROGRESS
+
+
+def _record_progress_event(user_id: str, module: str, title: str, xp: int = 0) -> dict[str, Any]:
+    if _pg_ready():
+        try:
+            return pg_record_activity(user_id, module, title, xp)
+        except Exception:
+            # Fall back to memory mode if postgres is temporarily unavailable.
+            pass
+
+    USER_PROGRESS["total_xp"] += xp
+    if module in USER_PROGRESS["module_counts"]:
+        USER_PROGRESS["module_counts"][module] += 1
+    else:
+        USER_PROGRESS["module_counts"][module] = 1
+
+    today = datetime.now().date().isoformat()
+    if USER_PROGRESS["last_activity_date"] != today:
+        USER_PROGRESS["streak_days"] += 1
+        USER_PROGRESS["last_activity_date"] = today
+
+    USER_PROGRESS["activities"].insert(
+        0,
+        {
+            "id": f"activity-{len(USER_PROGRESS['activities']) + 1}",
+            "module": module,
+            "title": title,
+            "xp": xp,
+            "time": datetime.now().isoformat(),
+        },
+    )
+    USER_PROGRESS["activities"] = USER_PROGRESS["activities"][:20]
+    return {
+        "success": True,
+        "total_xp": USER_PROGRESS["total_xp"],
+        "streak_days": USER_PROGRESS["streak_days"],
+        "last_activity_date": USER_PROGRESS["last_activity_date"],
+    }
+
+
 def _get_toeic_set(set_id: str) -> dict[str, Any]:
     for item in TOEIC_SETS:
         if item["id"] == set_id:
@@ -1305,11 +1801,600 @@ def _get_test(slug: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Aptis test not found")
 
 
+def _get_active_full_test_packs() -> list[dict[str, Any]]:
+    return admin_get_full_test_catalog(TOEIC_FULL_TEST_PACKS)
+
+
+def _get_active_exam_themes() -> list[dict[str, Any]]:
+    return admin_get_exam_themes_catalog(TOEIC_EXAM_THEMES)
+
+
+def _get_active_question_bank() -> dict[str, Any]:
+    return admin_get_question_bank_catalog(TOEIC_EXAM_QUESTION_BANK)
+
+
+def _require_authenticated_user(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    return _get_current_auth_user(authorization)
+
+
 def _get_full_test_pack(pack_id: str) -> dict[str, Any]:
-    for item in TOEIC_FULL_TEST_PACKS:
+    for item in _get_active_full_test_packs():
         if item["id"] == pack_id:
             return item
     raise HTTPException(status_code=404, detail="TOEIC full test not found")
+
+
+def _get_full_test_document(pack_id: str) -> dict[str, Any]:
+    document = admin_get_exam_document(pack_id)
+    if not document or not document.get("document_available"):
+        raise HTTPException(status_code=404, detail="TOEIC full test document not found")
+    return document
+
+
+def _normalize_selected_part_labels(pack: dict[str, Any], selected_parts: list[str]) -> list[str]:
+    available_parts = [item.get("part") for item in pack.get("parts", []) if item.get("part")]
+    normalized: list[str] = []
+    for part_label in selected_parts or []:
+        if part_label in available_parts and part_label not in normalized:
+            normalized.append(part_label)
+    return normalized or available_parts
+
+
+def _part_label(part_number: Any) -> str:
+    return f"Part {_safe_int(part_number, 0)}"
+
+
+def _question_count_for_section(section: dict[str, Any]) -> int:
+    return sum(
+        len(group.get("questions") or [])
+        for part in section.get("parts", [])
+        for group in part.get("groups", [])
+    )
+
+
+def _filter_full_test_document_by_parts(document: dict[str, Any], selected_parts: list[str]) -> dict[str, Any]:
+    selected_set = set(selected_parts)
+    filtered_sections: dict[str, Any] = {}
+    total_duration = 0
+    total_questions = 0
+
+    for skill in ("listening", "reading"):
+        section = document.get("sections", {}).get(skill) or {}
+        parts = [
+            part
+            for part in section.get("parts", [])
+            if _part_label(part.get("part_number")) in selected_set
+        ]
+        original_question_count = max(_safe_int(section.get("question_count"), _question_count_for_section(section)), 1)
+        filtered_question_count = sum(_safe_int(part.get("question_count"), 0) for part in parts)
+        if not parts or filtered_question_count <= 0:
+            continue
+
+        section_duration = _safe_int(section.get("duration_minutes"), 0)
+        proportional_duration = section_duration if filtered_question_count >= original_question_count else round(
+            section_duration * (filtered_question_count / original_question_count)
+        )
+        normalized_duration = max(proportional_duration, 1)
+
+        filtered_sections[skill] = {
+            **section,
+            "parts": parts,
+            "question_count": filtered_question_count,
+            "duration_minutes": normalized_duration,
+        }
+        total_duration += normalized_duration
+        total_questions += filtered_question_count
+
+    return {
+        **document,
+        "sections": filtered_sections,
+        "selected_parts": list(selected_parts),
+        "selected_question_count": total_questions,
+        "selected_duration_minutes": total_duration,
+    }
+
+
+def _build_full_test_display_choices(question: dict[str, Any], *, skill: str, part_number: int) -> list[dict[str, str]]:
+    raw_choices = question.get("choices") if isinstance(question.get("choices"), list) else []
+    if skill == "reading":
+        display = []
+        for index, choice in enumerate(raw_choices):
+            if isinstance(choice, dict):
+                display.append(
+                    {
+                        "key": str(choice.get("key") or chr(65 + index)).strip().upper(),
+                        "text": str(choice.get("text") or "").strip(),
+                    }
+                )
+            else:
+                display.append(
+                    {
+                        "key": chr(65 + index),
+                        "text": str(choice or "").strip(),
+                    }
+                )
+        return display
+
+    option_count = 3 if part_number == 2 else 4
+    if raw_choices:
+        option_count = len(raw_choices)
+    return [{"key": chr(65 + index), "text": ""} for index in range(option_count)]
+
+
+def _build_public_full_test_question(
+    question: dict[str, Any],
+    *,
+    skill: str,
+    part_number: int,
+) -> dict[str, Any]:
+    display_choices = _build_full_test_display_choices(question, skill=skill, part_number=part_number)
+    return {
+        "id": question.get("id"),
+        "number": _safe_int(question.get("number"), 0),
+        "prompt": question.get("prompt") or "",
+        "support_text": question.get("support_text") or "",
+        "question_type": question.get("question_type") or "",
+        "note": question.get("note") or "",
+        "display_choices": display_choices,
+        "printed_choices": skill == "reading",
+    }
+
+
+def _build_public_full_test_session(record: dict[str, Any], document: dict[str, Any]) -> dict[str, Any]:
+    filtered_document = _filter_full_test_document_by_parts(document, record.get("selected_parts", []))
+    public_sections = []
+    for skill in ("listening", "reading"):
+        section = filtered_document.get("sections", {}).get(skill)
+        if not section:
+            continue
+        public_parts = []
+        for part in section.get("parts", []):
+            part_number = _safe_int(part.get("part_number"), 0)
+            public_groups = []
+            for group in part.get("groups", []):
+                public_groups.append(
+                    {
+                        "id": group.get("id"),
+                        "title": group.get("title") or "",
+                        "directions": group.get("directions") or "",
+                        "transcript": group.get("transcript") or "",
+                        "audio_url": group.get("audio_url") or "",
+                        "image_url": group.get("image_url") or "",
+                        "graphic_url": group.get("graphic_url") or "",
+                        "notes": group.get("notes") or "",
+                        "question_range": group.get("question_range") or "",
+                        "question_numbers": group.get("question_numbers") or [],
+                        "passages": group.get("passages") or [],
+                        "questions": [
+                            _build_public_full_test_question(question, skill=skill, part_number=part_number)
+                            for question in group.get("questions", [])
+                        ],
+                    }
+                )
+            public_parts.append(
+                {
+                    "part_number": part_number,
+                    "part_label": _part_label(part_number),
+                    "title": part.get("title") or "",
+                    "type": part.get("type") or "",
+                    "directions": part.get("directions") or "",
+                    "question_count": _safe_int(part.get("question_count"), 0),
+                    "groups": public_groups,
+                }
+            )
+        public_sections.append(
+            {
+                "skill": skill,
+                "title": section.get("title") or skill.title(),
+                "duration_minutes": _safe_int(section.get("duration_minutes"), 0),
+                "question_count": _safe_int(section.get("question_count"), 0),
+                "parts": public_parts,
+            }
+        )
+
+    return {
+        "id": record["id"],
+        "user_id": record.get("user_id") or DEFAULT_PROGRESS_USER_ID,
+        "pack_id": record["pack_id"],
+        "title": record["title"],
+        "series": record["series"],
+        "mode": record["mode"],
+        "selected_parts": record.get("selected_parts", []),
+        "selected_questions": _safe_int(record.get("selected_questions"), filtered_document.get("selected_question_count")),
+        "duration_minutes": _safe_int(record.get("duration_minutes"), filtered_document.get("selected_duration_minutes")),
+        "started_at": record.get("started_at"),
+        "submitted": bool(record.get("submitted")),
+        "submitted_at": record.get("submitted_at"),
+        "result": record.get("result") if record.get("submitted") else None,
+        "sections": public_sections,
+    }
+
+
+def _find_full_test_session_record(session_id: str) -> dict[str, Any]:
+    for record in TOEIC_FULL_TEST_HISTORY:
+        if record.get("id") == session_id:
+            return record
+    raise HTTPException(status_code=404, detail="TOEIC full test session not found")
+
+
+def _normalize_full_test_answer_map(answers: list[FullTestSessionSubmitAnswer]) -> dict[str, str]:
+    answer_map: dict[str, str] = {}
+    for item in answers or []:
+        question_id = str(item.question_id or "").strip()
+        if not question_id:
+            continue
+        answer_map[question_id] = str(item.answer_key or "").strip().upper()
+    return answer_map
+
+
+def _normalize_full_test_notes(notes: dict[str, str]) -> dict[str, str]:
+    if not isinstance(notes, dict):
+        return {}
+
+    normalized: dict[str, str] = {}
+    for question_id, content in notes.items():
+        normalized_question_id = str(question_id or "").strip()
+        if not normalized_question_id:
+            continue
+        text = str(content or "").strip()
+        if text:
+            normalized[normalized_question_id] = text
+    return normalized
+
+
+def _save_full_test_resume_state(record: dict[str, Any], payload: FullTestSessionSaveRequest) -> dict[str, Any]:
+    saved_at = datetime.now().isoformat()
+    resume_state = {
+        "session_id": record["id"],
+        "user_id": str(payload.user_id or record.get("user_id") or DEFAULT_PROGRESS_USER_ID),
+        "pack_id": record.get("pack_id"),
+        "title": record.get("title"),
+        "series": record.get("series"),
+        "mode": record.get("mode"),
+        "selected_parts": list(record.get("selected_parts") or []),
+        "selected_questions": _safe_int(record.get("selected_questions"), 0),
+        "duration_minutes": _safe_int(record.get("duration_minutes"), 0),
+        "current_group_index": max(0, _safe_int(payload.current_group_index, 0)),
+        "answers": _normalize_full_test_answer_map(payload.answers),
+        "notes": _normalize_full_test_notes(payload.notes),
+        "started_at": record.get("started_at") or saved_at,
+        "saved_at": saved_at,
+    }
+    TOEIC_FULL_TEST_RESUMES[record["id"]] = resume_state
+
+    if _pg_ready():
+        try:
+            persisted = pg_save_full_test_resume(resume_state)
+            if persisted:
+                resume_state = {
+                    **resume_state,
+                    **persisted,
+                }
+                TOEIC_FULL_TEST_RESUMES[record["id"]] = resume_state
+        except Exception:
+            pass
+
+    return resume_state
+
+
+def _get_full_test_resume_state(session_id: str, user_id: Optional[str] = None) -> Optional[dict[str, Any]]:
+    if _pg_ready():
+        try:
+            persisted = pg_get_full_test_resume(session_id, user_id=user_id)
+            if persisted:
+                TOEIC_FULL_TEST_RESUMES[session_id] = persisted
+                return persisted
+        except Exception:
+            pass
+
+    resume_state = TOEIC_FULL_TEST_RESUMES.get(session_id)
+    if not resume_state:
+        return None
+    if user_id and resume_state.get("user_id") != user_id:
+        return None
+    return resume_state
+
+
+def _get_latest_full_test_resume_state(user_id: str) -> Optional[dict[str, Any]]:
+    if _pg_ready():
+        try:
+            persisted = pg_get_latest_full_test_resume(user_id)
+            if persisted:
+                TOEIC_FULL_TEST_RESUMES[persisted["session_id"]] = persisted
+                return persisted
+        except Exception:
+            pass
+
+    candidates = [
+        item
+        for item in TOEIC_FULL_TEST_RESUMES.values()
+        if item.get("user_id") == user_id
+    ]
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: str(item.get("saved_at") or item.get("started_at") or ""), reverse=True)
+    return candidates[0]
+
+
+def _clear_full_test_resume_state(session_id: str) -> None:
+    TOEIC_FULL_TEST_RESUMES.pop(session_id, None)
+    if _pg_ready():
+        try:
+            pg_delete_full_test_resume(session_id)
+        except Exception:
+            pass
+
+
+def _restore_full_test_session_from_resume(resume_state: dict[str, Any]) -> Optional[dict[str, Any]]:
+    session_id = str(resume_state.get("session_id") or "").strip()
+    if not session_id:
+        return None
+
+    try:
+        return _find_full_test_session_record(session_id)
+    except HTTPException:
+        pass
+
+    pack_id = str(resume_state.get("pack_id") or "").strip()
+    if not pack_id:
+        return None
+
+    try:
+        pack = _get_full_test_pack(pack_id)
+    except HTTPException:
+        return None
+
+    restored_record = {
+        "id": session_id,
+        "user_id": resume_state.get("user_id") or DEFAULT_PROGRESS_USER_ID,
+        "pack_id": pack["id"],
+        "title": resume_state.get("title") or pack.get("title") or "TOEIC Full Test",
+        "series": resume_state.get("series") or pack.get("series") or "ETS",
+        "mode": resume_state.get("mode") or "practice",
+        "selected_parts": list(resume_state.get("selected_parts") or []),
+        "selected_questions": _safe_int(resume_state.get("selected_questions"), _safe_int(pack.get("questions"), 0)),
+        "duration_minutes": _safe_int(resume_state.get("duration_minutes"), _safe_int(pack.get("duration_minutes"), 120)),
+        "started_at": resume_state.get("started_at") or datetime.now().isoformat(),
+        "submitted": False,
+        "submitted_at": None,
+        "result": None,
+    }
+    TOEIC_FULL_TEST_HISTORY.insert(0, restored_record)
+    return restored_record
+
+
+def _build_public_full_test_resume_item(resume_state: dict[str, Any]) -> dict[str, Any]:
+    answers = resume_state.get("answers") if isinstance(resume_state.get("answers"), dict) else {}
+    answered_count = sum(1 for value in answers.values() if str(value or "").strip())
+    selected_questions = _safe_int(resume_state.get("selected_questions"), 0)
+    current_group_index = max(0, _safe_int(resume_state.get("current_group_index"), 0))
+
+    return {
+        "session_id": resume_state.get("session_id"),
+        "pack_id": resume_state.get("pack_id"),
+        "title": resume_state.get("title"),
+        "series": resume_state.get("series"),
+        "mode": resume_state.get("mode"),
+        "selected_parts": list(resume_state.get("selected_parts") or []),
+        "selected_questions": selected_questions,
+        "duration_minutes": _safe_int(resume_state.get("duration_minutes"), 0),
+        "current_group_index": current_group_index,
+        "answered_count": answered_count,
+        "progress_label": f"{min(current_group_index + 1, max(selected_questions, 1))} of {max(selected_questions, 1)}",
+        "saved_at": resume_state.get("saved_at"),
+    }
+
+
+def _iter_selected_session_questions(document: dict[str, Any], selected_parts: list[str]) -> list[tuple[str, int, dict[str, Any], dict[str, Any]]]:
+    filtered_document = _filter_full_test_document_by_parts(document, selected_parts)
+    items: list[tuple[str, int, dict[str, Any], dict[str, Any]]] = []
+    for skill in ("listening", "reading"):
+        section = filtered_document.get("sections", {}).get(skill)
+        if not section:
+            continue
+        for part in section.get("parts", []):
+            part_number = _safe_int(part.get("part_number"), 0)
+            for group in part.get("groups", []):
+                for question in group.get("questions", []):
+                    items.append((skill, part_number, group, question))
+    return items
+
+
+def _estimate_toeic_scaled_score(correct: int, total: int) -> int:
+    if total <= 0:
+        return 0
+    if correct <= 0:
+        return 5
+    return min(495, 5 + round((correct / total) * 490))
+
+
+def _grade_full_test_session(record: dict[str, Any], document: dict[str, Any], answers: list[FullTestSessionSubmitAnswer]) -> dict[str, Any]:
+    answer_map = {
+        str(item.question_id).strip(): str(item.answer_key or "").strip().upper()
+        for item in answers
+        if str(item.question_id or "").strip()
+    }
+
+    section_totals: dict[str, dict[str, Any]] = {}
+    part_results: list[dict[str, Any]] = []
+    total_correct = 0
+    total_questions = 0
+
+    grouped: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for skill, part_number, _group, question in _iter_selected_session_questions(document, record.get("selected_parts", [])):
+        grouped.setdefault((skill, part_number), []).append(question)
+
+    for (skill, part_number), questions in grouped.items():
+        correct_count = 0
+        for question in questions:
+            total_questions += 1
+            user_answer = answer_map.get(str(question.get("id") or "").strip(), "")
+            correct_answer = str(question.get("answer_key") or "").strip().upper()
+            if user_answer and correct_answer and user_answer == correct_answer:
+                correct_count += 1
+                total_correct += 1
+
+        part_total = len(questions)
+        part_results.append(
+            {
+                "skill": skill,
+                "part_number": part_number,
+                "part_label": _part_label(part_number),
+                "correct": correct_count,
+                "total": part_total,
+                "accuracy": round((correct_count / part_total) * 100, 1) if part_total else 0.0,
+            }
+        )
+        section_totals.setdefault(
+            skill,
+            {
+                "skill": skill,
+                "title": "Listening" if skill == "listening" else "Reading",
+                "correct": 0,
+                "total": 0,
+            },
+        )
+        section_totals[skill]["correct"] += correct_count
+        section_totals[skill]["total"] += part_total
+
+    section_results = []
+    for skill in ("listening", "reading"):
+        section = section_totals.get(skill)
+        if not section:
+            continue
+        section_accuracy = round((section["correct"] / section["total"]) * 100, 1) if section["total"] else 0.0
+        section_results.append(
+            {
+                **section,
+                "accuracy": section_accuracy,
+                "estimated_score": _estimate_toeic_scaled_score(section["correct"], section["total"]),
+            }
+        )
+
+    accuracy = round((total_correct / total_questions) * 100, 1) if total_questions else 0.0
+    awarded_xp = max(10 if record.get("mode") == "practice" else 18, round(total_correct * 0.4))
+    estimated_total_score = sum(section.get("estimated_score", 0) for section in section_results)
+    return {
+        "session_id": record["id"],
+        "mode": record.get("mode"),
+        "correct_count": total_correct,
+        "total_questions": total_questions,
+        "accuracy": accuracy,
+        "awarded_xp": awarded_xp,
+        "estimated_score": estimated_total_score,
+        "sections": section_results,
+        "parts": sorted(part_results, key=lambda item: item["part_number"]),
+    }
+
+
+def _count_question_bank_questions(question_bank: dict[str, Any]) -> int:
+    total = 0
+    for skill_map in question_bank.values():
+        if not isinstance(skill_map, dict):
+            continue
+        for questions in skill_map.values():
+            if isinstance(questions, list):
+                total += len(questions)
+    return total
+
+
+def _admin_fallback_student_summary() -> dict[str, int]:
+    today = datetime.now().date().isoformat()
+    total_students = len(AUTH_USERS_BY_ID)
+    online_today = 1 if USER_PROGRESS.get("last_activity_date") == today else 0
+    return {
+        "total_students": total_students,
+        "visitors_today": online_today,
+        "online_today": online_today,
+        "away_today": 0,
+        "offline_today": max(total_students - online_today, 0),
+    }
+
+
+def _admin_fallback_student_activity(limit: int = 12) -> list[dict[str, Any]]:
+    items = []
+    today = datetime.now().date().isoformat()
+    for user in AUTH_USERS_BY_ID.values():
+        items.append(
+            {
+                "user_id": user["id"],
+                "display_name": user.get("full_name") or user["username"],
+                "email": user["email"],
+                "last_activity_date": USER_PROGRESS.get("last_activity_date") if user["id"] == DEFAULT_PROGRESS_USER_ID else None,
+                "total_xp": USER_PROGRESS.get("total_xp", 0) if user["id"] == DEFAULT_PROGRESS_USER_ID else 0,
+                "streak_days": USER_PROGRESS.get("streak_days", 0) if user["id"] == DEFAULT_PROGRESS_USER_ID else 0,
+                "activities_count": len(USER_PROGRESS.get("activities", [])) if user["id"] == DEFAULT_PROGRESS_USER_ID else 0,
+                "status": "online" if user["id"] == DEFAULT_PROGRESS_USER_ID and USER_PROGRESS.get("last_activity_date") == today else "offline",
+                "created_at": user["created_at"],
+            }
+        )
+    items.sort(
+        key=lambda item: (
+            1 if item["status"] == "online" else 0,
+            item["last_activity_date"] or "",
+            item["activities_count"],
+            item["created_at"],
+        ),
+        reverse=True,
+    )
+    return items[:limit]
+
+
+def _build_admin_toeic_overview() -> dict[str, Any]:
+    full_test_catalog = _get_active_full_test_packs()
+    active_question_bank = _get_active_question_bank()
+    active_themes = _get_active_exam_themes()
+    state = admin_get_state()
+
+    submitted_results = [
+        session["result"]
+        for session in TOEIC_EXAM_SESSIONS.values()
+        if session.get("submitted") and session.get("result")
+    ]
+    average_score = round(
+        sum(result.get("accuracy", 0) for result in submitted_results) / len(submitted_results),
+        1,
+    ) if submitted_results else 0.0
+
+    if _pg_ready():
+        student_summary = pg_get_admin_student_summary()
+        student_activity = pg_get_admin_student_activity(limit=12)
+    else:
+        student_summary = _admin_fallback_student_summary()
+        student_activity = _admin_fallback_student_activity(limit=12)
+
+    uploaded_exam_ids = {
+        pack.get("id")
+        for pack in state.get("packs", [])
+        if isinstance(pack, dict) and pack.get("id")
+    }
+    uploaded_exam_ids.update(
+        document.get("id")
+        for document in state.get("exam_documents", [])
+        if isinstance(document, dict) and document.get("id")
+    )
+
+    return {
+        "brand": "TOEIC Admin",
+        "overview": {
+            "total_exams": len(full_test_catalog),
+            "total_questions": sum(int(item.get("questions", 0)) for item in full_test_catalog),
+            "question_bank_questions": _count_question_bank_questions(active_question_bank),
+            "total_students": student_summary.get("total_students", 0),
+            "average_score": average_score,
+            "visitors_today": student_summary.get("visitors_today", 0),
+            "online_today": student_summary.get("online_today", 0),
+            "uploaded_exams": len(uploaded_exam_ids),
+            "active_themes": len(active_themes),
+        },
+        "student_activity": {
+            "summary": student_summary,
+            "items": student_activity,
+        },
+        "recent_imports": state.get("import_history", [])[:6],
+    }
 
 
 def _build_quiz_for_set(set_item: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1343,7 +2428,8 @@ def _sanitize_exam_question(question: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_exam_session_sections(skills: list[str], theme: str) -> list[dict[str, Any]]:
-    theme_bank = TOEIC_EXAM_QUESTION_BANK[theme]
+    question_bank = _get_active_question_bank()
+    theme_bank = question_bank[theme]
     skill_meta_map = {item["key"]: item for item in TOEIC_EXAM_SKILLS}
 
     pick_per_skill = 4 if len(skills) <= 2 else 3
@@ -1488,8 +2574,223 @@ def _ensure_reading_flashcard(question_id: str) -> dict[str, Any]:
 
 
 @app.get("/api/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, Any]:
+    db_ready = pg_check_connection() if pg_is_enabled() else False
+    return {
+        "status": "ok",
+        "storage": "postgres" if _pg_ready() else "memory",
+        "postgres": {
+            "enabled": pg_is_enabled(),
+            "ready": db_ready,
+            "bootstrap": PG_BOOTSTRAP_STATE,
+        },
+    }
+
+
+@app.post("/api/admin/auth/login")
+def admin_auth_login(payload: AdminAuthLoginRequest) -> dict[str, Any]:
+    email = _normalize_email(payload.email)
+    if email != ADMIN_AUTH_USER["email"] or not _verify_password(payload.password, ADMIN_AUTH_USER["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid admin email or password")
+
+    return {
+        "success": True,
+        "admin": _admin_user_payload(ADMIN_AUTH_USER),
+        "tokens": _create_admin_auth_tokens(ADMIN_AUTH_USER),
+    }
+
+
+@app.get("/api/admin/auth/me")
+def admin_auth_me(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    admin_user = _get_current_admin_user(authorization)
+    return {"admin": _admin_user_payload(admin_user)}
+
+
+@app.post("/api/admin/auth/logout")
+def admin_auth_logout(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    return {
+        "success": True,
+        "message": "Admin logged out on client side. Stateless token expires automatically.",
+    }
+
+
+@app.get("/api/admin/toeic/overview")
+def admin_get_toeic_overview(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    return _build_admin_toeic_overview()
+
+
+@app.get("/api/admin/toeic/full-tests")
+def admin_get_toeic_full_tests(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    full_test_catalog = _get_active_full_test_packs()
+    return {
+        "items": full_test_catalog,
+        "series": sorted({item["series"] for item in full_test_catalog}),
+    }
+
+
+@app.get("/api/admin/toeic/full-tests/{pack_id}")
+def admin_get_toeic_full_test_detail(
+    pack_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    pack = _get_full_test_pack(pack_id)
+    document = admin_get_exam_document(pack_id)
+    return {
+        "item": pack,
+        "document": document,
+    }
+
+
+@app.post("/api/admin/toeic/full-tests")
+def admin_upsert_toeic_full_test(
+    payload: AdminToeicPackRequest,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    pack = admin_upsert_full_test_pack(payload.model_dump())
+    return {
+        "success": True,
+        "message": f"Saved TOEIC full test {pack['title']}",
+        "item": pack,
+    }
+
+
+@app.delete("/api/admin/toeic/full-tests/{pack_id}")
+def admin_delete_toeic_full_test(
+    pack_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    deleted = admin_delete_full_test_pack(pack_id)
+    return {
+        "success": True,
+        "message": f"Deleted TOEIC full test {deleted['deleted_id']}",
+        **deleted,
+    }
+
+
+@app.post("/api/admin/toeic/import-json")
+def admin_import_toeic_json(
+    payload: dict[str, Any],
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    result = admin_import_bundle(payload, source_label="json")
+    return {
+        "success": True,
+        "message": "Imported TOEIC admin JSON successfully",
+        **result,
+    }
+
+
+@app.post("/api/admin/toeic/import-file")
+async def admin_import_toeic_file(
+    file: UploadFile = File(...),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    if not file.filename or not file.filename.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="Please upload a JSON file")
+
+    raw = await file.read()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON file: {exc}")
+
+    result = admin_import_bundle(payload, source_label=file.filename)
+    return {
+        "success": True,
+        "message": f"Imported TOEIC data from {file.filename}",
+        **result,
+    }
+
+
+@app.get("/api/admin/toeic/export")
+def admin_export_toeic_bundle(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _get_current_admin_user(authorization)
+    return admin_export_bundle(
+        TOEIC_FULL_TEST_PACKS,
+        TOEIC_EXAM_THEMES,
+        TOEIC_EXAM_QUESTION_BANK,
+    )
+
+
+@app.post("/api/auth/register")
+def auth_register(payload: AuthRegisterRequest) -> dict[str, Any]:
+    _ = payload
+    raise HTTPException(
+        status_code=410,
+        detail="Email/password registration is disabled. Please continue with Google sign-in.",
+    )
+
+
+@app.post("/api/auth/login")
+def auth_login(payload: AuthLoginRequest) -> dict[str, Any]:
+    _ = payload
+    raise HTTPException(
+        status_code=410,
+        detail="Email/password login is disabled. Please continue with Google sign-in.",
+    )
+
+@app.post("/api/auth/google")
+def auth_google(payload: GoogleAuthRequest) -> dict[str, Any]:
+    claims = _verify_google_credential(payload.credential)
+    user = _find_or_create_google_user(claims)
+    tokens = _create_auth_tokens(user)
+    return {
+        "success": True,
+        "message": "Google sign-in successful",
+        "user": _user_payload(user),
+        "tokens": tokens,
+    }
+
+
+@app.post("/api/auth/refresh")
+def auth_refresh(payload: AuthRefreshRequest) -> dict[str, Any]:
+    refresh_payload = _decode_auth_token(payload.refresh_token, expected_type="refresh")
+
+    user = pg_get_user_by_id(refresh_payload["sub"]) if _pg_ready() else AUTH_USERS_BY_ID.get(refresh_payload["sub"])
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    tokens = _create_auth_tokens(user)
+    return {"success": True, "tokens": tokens}
+
+
+@app.get("/api/auth/me")
+def auth_me(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    user = _get_current_auth_user(authorization)
+    return {"user": _user_payload(user)}
+
+
+@app.post("/api/auth/logout")
+def auth_logout(
+    payload: AuthLogoutRequest,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    _ = payload.refresh_token
+    _ = authorization
+    return {
+        "success": True,
+        "message": "Logged out on client side. Stateless tokens expire automatically.",
+    }
 
 
 @app.get("/api/site/overview")
@@ -1567,8 +2868,9 @@ def get_toeic_full_tests(series: str = "", q: str = "") -> dict[str, Any]:
     normalized_series = series.strip().lower()
     normalized_query = q.strip().lower()
     filtered = []
+    full_test_catalog = _get_active_full_test_packs()
 
-    for item in TOEIC_FULL_TEST_PACKS:
+    for item in full_test_catalog:
         if normalized_series and item["series"].lower() != normalized_series:
             continue
         if normalized_query:
@@ -1577,14 +2879,36 @@ def get_toeic_full_tests(series: str = "", q: str = "") -> dict[str, Any]:
                 continue
         filtered.append(item)
 
-    series_list = sorted({item["series"] for item in TOEIC_FULL_TEST_PACKS})
+    series_list = sorted({item["series"] for item in full_test_catalog})
     return {"series": series_list, "items": filtered}
+
+
+@app.get("/api/toeic/full-tests/resume")
+def get_toeic_full_test_resume(user_id: str = DEFAULT_PROGRESS_USER_ID) -> dict[str, Any]:
+    normalized_user_id = str(user_id or DEFAULT_PROGRESS_USER_ID).strip() or DEFAULT_PROGRESS_USER_ID
+    resume_state = _get_latest_full_test_resume_state(normalized_user_id)
+    if not resume_state:
+        return {"item": None}
+
+    restored_record = _restore_full_test_session_from_resume(resume_state)
+    if not restored_record:
+        _clear_full_test_resume_state(str(resume_state.get("session_id") or ""))
+        return {"item": None}
+
+    if restored_record.get("submitted"):
+        _clear_full_test_resume_state(restored_record["id"])
+        return {"item": None}
+
+    return {"item": _build_public_full_test_resume_item(resume_state)}
 
 
 @app.get("/api/toeic/full-tests/{pack_id}")
 def get_toeic_full_test_detail(pack_id: str) -> dict[str, Any]:
     pack = _get_full_test_pack(pack_id)
-    return pack
+    return {
+        **pack,
+        "document_available": bool(admin_get_exam_document(pack_id)),
+    }
 
 
 @app.post("/api/toeic/full-tests/{pack_id}/launch")
@@ -1592,7 +2916,16 @@ def launch_toeic_full_test(pack_id: str, payload: FullTestLaunchRequest) -> dict
     from datetime import datetime
 
     pack = _get_full_test_pack(pack_id)
+    _get_full_test_document(pack_id)
     mode = payload.mode if payload.mode in {"exam", "practice"} else "practice"
+    selected_parts = _normalize_selected_part_labels(pack, payload.selected_parts if mode == "practice" else [])
+    selected_question_count = sum(
+        int(item.get("count") or 0)
+        for item in pack.get("parts", [])
+        if item.get("part") in selected_parts
+    )
+    document = _get_full_test_document(pack_id)
+    filtered_document = _filter_full_test_document_by_parts(document, selected_parts)
     session_id = f"toeic-session-{len(TOEIC_FULL_TEST_HISTORY) + 1}"
 
     launch_record = {
@@ -1602,33 +2935,23 @@ def launch_toeic_full_test(pack_id: str, payload: FullTestLaunchRequest) -> dict
         "title": pack["title"],
         "series": pack["series"],
         "mode": mode,
+        "selected_parts": selected_parts,
+        "selected_questions": selected_question_count,
+        "duration_minutes": filtered_document.get("selected_duration_minutes") or pack.get("duration_minutes") or 120,
         "started_at": datetime.now().isoformat(),
+        "submitted": False,
+        "submitted_at": None,
+        "result": None,
     }
     TOEIC_FULL_TEST_HISTORY.insert(0, launch_record)
-
-    xp = 24 if mode == "exam" else 14
-    USER_PROGRESS["total_xp"] += xp
-    USER_PROGRESS["module_counts"]["quiz"] += 1
-    today = datetime.now().date().isoformat()
-    if USER_PROGRESS["last_activity_date"] != today:
-        USER_PROGRESS["streak_days"] += 1
-        USER_PROGRESS["last_activity_date"] = today
-    USER_PROGRESS["activities"].insert(
-        0,
-        {
-            "id": f"activity-{len(USER_PROGRESS['activities']) + 1}",
-            "module": "quiz",
-            "title": f"{'Luyen thi' if mode == 'exam' else 'Luyen tap'} • {pack['title']}",
-            "xp": xp,
-            "time": datetime.now().isoformat(),
-        },
-    )
-    USER_PROGRESS["activities"] = USER_PROGRESS["activities"][:20]
 
     return {
         "success": True,
         "session_id": session_id,
         "mode": mode,
+        "selected_parts": selected_parts,
+        "selected_questions": selected_question_count,
+        "duration_minutes": launch_record["duration_minutes"],
         "pack": {
             "id": pack["id"],
             "series": pack["series"],
@@ -1636,8 +2959,98 @@ def launch_toeic_full_test(pack_id: str, payload: FullTestLaunchRequest) -> dict
             "questions": pack["questions"],
             "duration_minutes": pack["duration_minutes"],
         },
-        "xp_awarded": xp,
     }
+
+
+@app.get("/api/toeic/full-tests/sessions/{session_id}")
+def get_toeic_full_test_session(session_id: str) -> dict[str, Any]:
+    try:
+        record = _find_full_test_session_record(session_id)
+    except HTTPException:
+        resume_state = _get_full_test_resume_state(session_id)
+        if not resume_state:
+            raise
+        record = _restore_full_test_session_from_resume(resume_state)
+        if not record:
+            _clear_full_test_resume_state(session_id)
+            raise HTTPException(status_code=404, detail="TOEIC full test session not found")
+
+    document = _get_full_test_document(record["pack_id"])
+    response = _build_public_full_test_session(record, document)
+
+    if record.get("submitted"):
+        response["resume_state"] = None
+        return response
+
+    resume_state = _get_full_test_resume_state(record["id"], user_id=record.get("user_id"))
+    if not resume_state:
+        response["resume_state"] = None
+        return response
+
+    response["resume_state"] = {
+        "answers": resume_state.get("answers") if isinstance(resume_state.get("answers"), dict) else {},
+        "notes": resume_state.get("notes") if isinstance(resume_state.get("notes"), dict) else {},
+        "current_group_index": max(0, _safe_int(resume_state.get("current_group_index"), 0)),
+        "saved_at": resume_state.get("saved_at"),
+    }
+    return response
+
+
+@app.post("/api/toeic/full-tests/sessions/{session_id}/save")
+def save_toeic_full_test_session(session_id: str, payload: FullTestSessionSaveRequest) -> dict[str, Any]:
+    try:
+        record = _find_full_test_session_record(session_id)
+    except HTTPException:
+        resume_state = _get_full_test_resume_state(session_id)
+        if not resume_state:
+            raise
+        record = _restore_full_test_session_from_resume(resume_state)
+        if not record:
+            raise HTTPException(status_code=404, detail="TOEIC full test session not found")
+
+    if record.get("submitted"):
+        raise HTTPException(status_code=400, detail="Session already submitted")
+
+    owner_user_id = str(record.get("user_id") or payload.user_id or DEFAULT_PROGRESS_USER_ID).strip() or DEFAULT_PROGRESS_USER_ID
+    if not record.get("user_id"):
+        record["user_id"] = owner_user_id
+
+    effective_payload = FullTestSessionSaveRequest(
+        user_id=owner_user_id,
+        current_group_index=max(0, _safe_int(payload.current_group_index, 0)),
+        answers=payload.answers,
+        notes=payload.notes,
+    )
+    resume_state = _save_full_test_resume_state(record, effective_payload)
+    return {
+        "success": True,
+        "session_id": session_id,
+        "saved_at": resume_state.get("saved_at"),
+        "current_group_index": resume_state.get("current_group_index"),
+        "answered_count": sum(1 for value in (resume_state.get("answers") or {}).values() if str(value or "").strip()),
+    }
+
+
+@app.post("/api/toeic/full-tests/sessions/{session_id}/submit")
+def submit_toeic_full_test_session(session_id: str, payload: FullTestSessionSubmitRequest) -> dict[str, Any]:
+    record = _find_full_test_session_record(session_id)
+    if record.get("submitted") and record.get("result"):
+        return record["result"]
+
+    document = _get_full_test_document(record["pack_id"])
+    result = _grade_full_test_session(record, document, payload.answers)
+    record["submitted"] = True
+    record["submitted_at"] = datetime.now().isoformat()
+    record["result"] = result
+    _clear_full_test_resume_state(session_id)
+
+    _record_progress_event(
+        DEFAULT_PROGRESS_USER_ID,
+        "quiz",
+        f"{'Luyen thi' if record['mode'] == 'exam' else 'Luyen tap'} • {record['title']} • {result['correct_count']}/{result['total_questions']}",
+        result["awarded_xp"],
+    )
+    return result
 
 
 @app.get("/api/toeic/grammar/progress")
@@ -1732,10 +3145,11 @@ def set_toeic_vocab_lesson_status(lesson_id: str, payload: VocabLessonStatusRequ
 
 @app.get("/api/toeic/exam/config")
 def get_toeic_exam_config() -> dict[str, Any]:
+    active_themes = _get_active_exam_themes()
     return {
         "skills": TOEIC_EXAM_SKILLS,
-        "themes": TOEIC_EXAM_THEMES,
-        "default_theme": TOEIC_EXAM_THEMES[0]["key"],
+        "themes": active_themes,
+        "default_theme": active_themes[0]["key"],
     }
 
 
@@ -1750,10 +3164,12 @@ def create_toeic_exam_session(payload: ToeicExamSessionRequest) -> dict[str, Any
     if not selected_skills:
         raise HTTPException(status_code=400, detail="Please select at least one skill")
 
-    theme_key = payload.theme if payload.theme in TOEIC_EXAM_QUESTION_BANK else TOEIC_EXAM_THEMES[0]["key"]
+    active_themes = _get_active_exam_themes()
+    active_question_bank = _get_active_question_bank()
+    theme_key = payload.theme if payload.theme in active_question_bank else active_themes[0]["key"]
     sections = _build_exam_session_sections(selected_skills, theme_key)
     total_minutes = sum(section["recommended_minutes"] for section in sections)
-    theme_meta = next((theme for theme in TOEIC_EXAM_THEMES if theme["key"] == theme_key), TOEIC_EXAM_THEMES[0])
+    theme_meta = next((theme for theme in active_themes if theme["key"] == theme_key), active_themes[0])
 
     session_id = f"toeic-exam-{uuid4().hex[:10]}"
     session = {
@@ -1850,23 +3266,12 @@ def submit_toeic_exam_session(session_id: str, payload: ToeicExamSubmitRequest) 
     total_accuracy = round((total_correct / total_questions) * 100) if total_questions else 0
     awarded_xp = total_correct * 6 + len(session["skills"]) * 10
 
-    USER_PROGRESS["total_xp"] += awarded_xp
-    USER_PROGRESS["module_counts"]["quiz"] += 1
-    today = datetime.now().date().isoformat()
-    if USER_PROGRESS["last_activity_date"] != today:
-        USER_PROGRESS["streak_days"] += 1
-        USER_PROGRESS["last_activity_date"] = today
-    USER_PROGRESS["activities"].insert(
-        0,
-        {
-            "id": f"activity-{len(USER_PROGRESS['activities']) + 1}",
-            "module": "quiz",
-            "title": f"TOEIC 4 skills exam • {session['theme_label']}",
-            "xp": awarded_xp,
-            "time": datetime.now().isoformat(),
-        },
+    _record_progress_event(
+        DEFAULT_PROGRESS_USER_ID,
+        "quiz",
+        f"TOEIC L&R exam • {session['theme_label']}",
+        awarded_xp,
     )
-    USER_PROGRESS["activities"] = USER_PROGRESS["activities"][:20]
 
     result = {
         "session_id": session["id"],
@@ -2253,6 +3658,7 @@ USER_PROGRESS = {
 }
 
 TOEIC_FULL_TEST_HISTORY: list[dict[str, Any]] = []
+TOEIC_FULL_TEST_RESUMES: dict[str, dict[str, Any]] = {}
 
 USER_GRAMMAR_PROGRESS: dict[str, dict[str, Any]] = {
     topic["id"]: {
@@ -2471,92 +3877,121 @@ class SaveWordRequest(BaseModel):
 
 
 @app.get("/api/toeic/progress/stats")
-def get_progress_stats() -> dict[str, Any]:
+def get_progress_stats(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Get user progress statistics"""
+    user_id = _resolve_progress_user_id(authorization)
+    snapshot = _snapshot_for_user(user_id)
     return {
-        "total_xp": USER_PROGRESS["total_xp"],
-        "streak_days": USER_PROGRESS["streak_days"],
-        "saved_word_count": len(USER_PROGRESS["saved_words"]),
-        "module_counts": USER_PROGRESS["module_counts"],
-        "last_activity_date": USER_PROGRESS["last_activity_date"],
+        "total_xp": snapshot.get("total_xp", 0),
+        "streak_days": snapshot.get("streak_days", 0),
+        "saved_word_count": snapshot.get("saved_word_count", len(snapshot.get("saved_words", []))),
+        "activities_count": snapshot.get("activities_count", 0),
+        "module_counts": snapshot.get("module_counts", {}),
+        "last_activity_date": snapshot.get("last_activity_date"),
+        "vocab_score": snapshot.get("vocab_score", 0),
+        "grammar_score": snapshot.get("grammar_score", 0),
+        "consistency_score": snapshot.get("consistency_score", 0),
+        "toeic_score": snapshot.get("toeic_score", 0),
     }
 
 
 @app.post("/api/toeic/progress/activity")
-def record_activity(activity: ActivityRecord) -> dict[str, Any]:
+def record_activity(
+    activity: ActivityRecord,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Record a learning activity"""
-    from datetime import datetime
-    
-    # Update XP
-    USER_PROGRESS["total_xp"] += activity.xp
-    
-    # Update module count
-    if activity.module in USER_PROGRESS["module_counts"]:
-        USER_PROGRESS["module_counts"][activity.module] += 1
-    
-    # Update streak
-    today = datetime.now().date().isoformat()
-    if USER_PROGRESS["last_activity_date"] != today:
-        USER_PROGRESS["streak_days"] += 1
-        USER_PROGRESS["last_activity_date"] = today
-    
-    # Add to activity log
-    activity_record = {
-        "id": f"activity-{len(USER_PROGRESS['activities']) + 1}",
-        "module": activity.module,
-        "title": activity.title,
-        "xp": activity.xp,
-        "time": datetime.now().isoformat(),
-    }
-    USER_PROGRESS["activities"].insert(0, activity_record)
-    
-    # Keep only last 20 activities
-    USER_PROGRESS["activities"] = USER_PROGRESS["activities"][:20]
-    
+    user_id = _resolve_progress_user_id(authorization)
+    result = _record_progress_event(user_id, activity.module, activity.title, activity.xp)
     return {
         "success": True,
-        "total_xp": USER_PROGRESS["total_xp"],
-        "streak_days": USER_PROGRESS["streak_days"],
+        "total_xp": result.get("total_xp", 0),
+        "streak_days": result.get("streak_days", 0),
     }
 
 
 @app.get("/api/toeic/progress/saved-words")
-def get_saved_words() -> dict[str, Any]:
+def get_saved_words(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Get list of saved words"""
-    return {"items": USER_PROGRESS["saved_words"]}
+    user_id = _resolve_progress_user_id(authorization)
+    snapshot = _snapshot_for_user(user_id)
+    return {"items": snapshot.get("saved_words", [])}
 
 
 @app.post("/api/toeic/progress/save-word")
-def save_word(word: SaveWordRequest) -> dict[str, Any]:
+def save_word(
+    word: SaveWordRequest,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Save a word to user's collection"""
-    # Check if already saved
+    user_id = _resolve_progress_user_id(authorization)
+
+    if _pg_ready():
+        try:
+            result = pg_save_word(user_id, word.dict())
+            if result.get("already_saved"):
+                return {"success": True, "message": "Word already saved", "saved_count": result.get("saved_count", 0)}
+            return {"success": True, "message": "Word saved", "saved_count": result.get("saved_count", 0)}
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to save word: {exc}")
+
     existing = [w for w in USER_PROGRESS["saved_words"] if w["id"] == word.id]
     if existing:
         return {"success": True, "message": "Word already saved", "saved_count": len(USER_PROGRESS["saved_words"])}
-    
+
     USER_PROGRESS["saved_words"].append(word.dict())
     return {"success": True, "message": "Word saved", "saved_count": len(USER_PROGRESS["saved_words"])}
 
 
 @app.delete("/api/toeic/progress/save-word/{word_id}")
-def unsave_word(word_id: str) -> dict[str, Any]:
+def unsave_word(
+    word_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Remove a word from saved collection"""
+    user_id = _resolve_progress_user_id(authorization)
+
+    if _pg_ready():
+        try:
+            result = pg_remove_saved_word(user_id, word_id)
+            return {"success": True, "message": "Word removed", "saved_count": result.get("saved_count", 0)}
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to remove word: {exc}")
+
     USER_PROGRESS["saved_words"] = [w for w in USER_PROGRESS["saved_words"] if w["id"] != word_id]
     return {"success": True, "message": "Word removed", "saved_count": len(USER_PROGRESS["saved_words"])}
 
 
 @app.get("/api/toeic/progress/activities")
-def get_recent_activities() -> dict[str, Any]:
+def get_recent_activities(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Get recent learning activities"""
+    user_id = _resolve_progress_user_id(authorization)
+    if _pg_ready():
+        try:
+            return {"items": pg_get_recent_activities(user_id, limit=10)}
+        except Exception:
+            pass
     return {"items": USER_PROGRESS["activities"][:10]}
 
 
 @app.get("/api/toeic/progress/streak")
-def get_streak() -> dict[str, Any]:
+def get_streak(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Get current streak information"""
+    user_id = _resolve_progress_user_id(authorization)
+    snapshot = _snapshot_for_user(user_id)
     return {
-        "streak_days": USER_PROGRESS["streak_days"],
-        "last_activity_date": USER_PROGRESS["last_activity_date"],
+        "streak_days": snapshot.get("streak_days", 0),
+        "last_activity_date": snapshot.get("last_activity_date"),
     }
 
 
@@ -2694,185 +4129,6 @@ def save_test_result(slug: str, payload: TestSubmission, user_id: str = "demo-us
 # ACHIEVEMENTS & LEADERBOARD
 # ============================================================================
 
-OFFICIAL_EXAMS = {
-    "toeic": {
-        "listening": {
-            "title": "TOEIC Listening Official Simulation",
-            "duration_minutes": 45,
-            "questions": [
-                {"id": "tl-1", "type": "mcq", "prompt": "What time is the meeting scheduled?", "options": ["8:15", "8:30", "9:00", "9:15"], "answer": 1},
-                {"id": "tl-2", "type": "mcq", "prompt": "Which department requested the report?", "options": ["HR", "Sales", "Finance", "IT"], "answer": 2},
-                {"id": "tl-3", "type": "mcq", "prompt": "Where will the client stay?", "options": ["Airport hotel", "Downtown hotel", "Company guesthouse", "Train station inn"], "answer": 0},
-                {"id": "tl-4", "type": "mcq", "prompt": "Why was the shipment delayed?", "options": ["Customs inspection", "Payment issue", "Driver sickness", "Warehouse closure"], "answer": 0},
-                {"id": "tl-5", "type": "mcq", "prompt": "What should employees submit by Friday?", "options": ["Passport copy", "Expense claim", "Updated contract", "Presentation file"], "answer": 1},
-            ],
-        },
-        "reading": {
-            "title": "TOEIC Reading Official Simulation",
-            "duration_minutes": 75,
-            "questions": [
-                {"id": "tr-1", "type": "mcq", "prompt": "The invoice must be paid ____ 10 business days.", "options": ["within", "unless", "although", "between"], "answer": 0},
-                {"id": "tr-2", "type": "mcq", "prompt": "Customers are advised to ____ online before visiting.", "options": ["reserve", "reserving", "reserved", "reservation"], "answer": 0},
-                {"id": "tr-3", "type": "mcq", "prompt": "The memo indicates that parking lot B is ____ renovation.", "options": ["by", "at", "under", "with"], "answer": 2},
-                {"id": "tr-4", "type": "mcq", "prompt": "According to the notice, refunds will be processed in 5 to 7 ____ days.", "options": ["working", "worker", "worked", "works"], "answer": 0},
-                {"id": "tr-5", "type": "mcq", "prompt": "The conference room is unavailable because it has been ____.", "options": ["book", "booking", "booked", "books"], "answer": 2},
-            ],
-        },
-        "speaking": {
-            "title": "TOEIC Speaking Official Simulation",
-            "duration_minutes": 20,
-            "questions": [
-                {"id": "ts-1", "type": "text", "prompt": "Describe a busy day at your workplace and how you prioritized tasks.", "min_words": 60},
-                {"id": "ts-2", "type": "text", "prompt": "Give your opinion: Should companies allow remote work three days a week?", "min_words": 70},
-            ],
-        },
-        "writing": {
-            "title": "TOEIC Writing Official Simulation",
-            "duration_minutes": 60,
-            "questions": [
-                {"id": "tw-1", "type": "text", "prompt": "Write an email to a supplier requesting an urgent delivery update.", "min_words": 90},
-                {"id": "tw-2", "type": "text", "prompt": "Write a short report recommending one process improvement for your team.", "min_words": 120},
-            ],
-        },
-    },
-    "aptis": {
-        "listening": {
-            "title": "Aptis Listening Official Simulation",
-            "duration_minutes": 40,
-            "questions": [
-                {"id": "al-1", "type": "mcq", "prompt": "What is the man mainly worried about?", "options": ["Traffic", "Deadline", "Budget", "Weather"], "answer": 1},
-                {"id": "al-2", "type": "mcq", "prompt": "What will happen after lunch?", "options": ["Factory tour", "Safety training", "Client meeting", "System upgrade"], "answer": 2},
-                {"id": "al-3", "type": "mcq", "prompt": "What does the speaker ask listeners to do?", "options": ["Print forms", "Confirm attendance", "Call support", "Join online"], "answer": 1},
-                {"id": "al-4", "type": "mcq", "prompt": "Where is the new office located?", "options": ["Near airport", "City center", "Industrial park", "University area"], "answer": 3},
-            ],
-        },
-        "reading": {
-            "title": "Aptis Reading Official Simulation",
-            "duration_minutes": 35,
-            "questions": [
-                {"id": "ar-1", "type": "mcq", "prompt": "Select the best heading for a paragraph about healthy routines.", "options": ["Time Management", "Daily Habits", "Work Culture", "Team Building"], "answer": 1},
-                {"id": "ar-2", "type": "mcq", "prompt": "The phrase 'carry out' in the article is closest in meaning to ____.", "options": ["cancel", "perform", "delay", "ignore"], "answer": 1},
-                {"id": "ar-3", "type": "mcq", "prompt": "Which statement is TRUE according to the text?", "options": ["Meetings are optional", "Training is annual", "Feedback is weekly", "Reports are private"], "answer": 2},
-                {"id": "ar-4", "type": "mcq", "prompt": "The writer's tone is mostly ____.", "options": ["critical", "neutral", "encouraging", "confused"], "answer": 2},
-            ],
-        },
-        "speaking": {
-            "title": "Aptis Speaking Official Simulation",
-            "duration_minutes": 12,
-            "questions": [
-                {"id": "as-1", "type": "text", "prompt": "Tell us about your hometown and what visitors can do there.", "min_words": 55},
-                {"id": "as-2", "type": "text", "prompt": "Compare studying online and studying in a classroom.", "min_words": 65},
-            ],
-        },
-        "writing": {
-            "title": "Aptis Writing Official Simulation",
-            "duration_minutes": 50,
-            "questions": [
-                {"id": "aw-1", "type": "text", "prompt": "Write a forum post about a skill you want to improve this year.", "min_words": 80},
-                {"id": "aw-2", "type": "text", "prompt": "Write an article on how technology changes language learning.", "min_words": 130},
-            ],
-        },
-    },
-}
-
-
-class OfficialExamSubmission(BaseModel):
-    answers: dict[str, Any]
-
-
-def _official_score_scale(exam_type: str, skill: str, ratio: float) -> int:
-    if exam_type == "toeic" and skill in {"listening", "reading"}:
-        return int(5 + ratio * 490)
-    if exam_type == "toeic" and skill in {"speaking", "writing"}:
-        return int(40 + ratio * 160)
-    if exam_type == "aptis":
-        return int(1 + ratio * 49)
-    return int(ratio * 100)
-
-
-def _grade_text_answer(answer: str, min_words: int) -> tuple[float, dict[str, Any]]:
-    normalized = (answer or "").strip()
-    words = [item for item in normalized.replace("\n", " ").split(" ") if item]
-    word_count = len(words)
-    sentence_count = max(1, normalized.count(".") + normalized.count("!") + normalized.count("?"))
-    has_linkers = any(linker in normalized.lower() for linker in ["because", "however", "therefore", "although", "moreover"])
-    length_ratio = min(1.0, word_count / max(min_words, 1))
-    structure_ratio = min(1.0, sentence_count / 3)
-    linker_ratio = 1.0 if has_linkers else 0.65
-    final_ratio = max(0.35, min(1.0, length_ratio * 0.6 + structure_ratio * 0.25 + linker_ratio * 0.15))
-
-    return final_ratio, {
-        "word_count": word_count,
-        "min_words": min_words,
-        "sentences": sentence_count,
-        "uses_linker": has_linkers,
-    }
-
-
-def _get_official_exam(exam_type: str, skill: str) -> dict[str, Any]:
-    exam_bank = OFFICIAL_EXAMS.get(exam_type)
-    if not exam_bank or skill not in exam_bank:
-        raise HTTPException(status_code=404, detail="Official exam skill not found")
-    return exam_bank[skill]
-
-
-@app.get("/api/{exam_type}/official/{skill}")
-def get_official_exam(exam_type: str, skill: str) -> dict[str, Any]:
-    exam = _get_official_exam(exam_type, skill)
-    return {
-        "exam_type": exam_type,
-        "skill": skill,
-        "title": exam["title"],
-        "duration_minutes": exam["duration_minutes"],
-        "questions": [{key: value for key, value in question.items() if key != "answer"} for question in exam["questions"]],
-    }
-
-
-@app.post("/api/{exam_type}/official/{skill}/submit")
-def submit_official_exam(exam_type: str, skill: str, payload: OfficialExamSubmission) -> dict[str, Any]:
-    exam = _get_official_exam(exam_type, skill)
-    answers = payload.answers or {}
-    total = len(exam["questions"])
-    if not total:
-        raise HTTPException(status_code=400, detail="Official exam has no questions")
-
-    breakdown = []
-    ratio_sum = 0.0
-    for question in exam["questions"]:
-        provided = answers.get(question["id"], "")
-        if question["type"] == "mcq":
-            is_correct = str(provided).strip() == str(question["answer"])
-            ratio_sum += 1.0 if is_correct else 0.0
-            breakdown.append({
-                "id": question["id"],
-                "type": "mcq",
-                "correct": is_correct,
-                "submitted": provided,
-                "expected": question["answer"],
-            })
-        else:
-            text_ratio, feedback = _grade_text_answer(str(provided), question.get("min_words", 50))
-            ratio_sum += text_ratio
-            breakdown.append({
-                "id": question["id"],
-                "type": "text",
-                "score_ratio": round(text_ratio, 2),
-                "feedback": feedback,
-                "submitted_excerpt": str(provided)[:100],
-            })
-
-    score_ratio = ratio_sum / total
-    return {
-        "exam_type": exam_type,
-        "skill": skill,
-        "title": exam["title"],
-        "accuracy": round(score_ratio * 100, 2),
-        "scaled_score": _official_score_scale(exam_type, skill, score_ratio),
-        "total_questions": total,
-        "submitted_at": datetime.now().isoformat(),
-        "breakdown": breakdown,
-    }
-
 ACHIEVEMENTS = [
     {"id": "first-search", "title": "First Search", "description": "Tra từ đầu tiên", "icon": "🔍", "xp_required": 0, "action_required": "search", "count_required": 1},
     {"id": "word-collector", "title": "Word Collector", "description": "Lưu 5 từ vựng", "icon": "📚", "xp_required": 0, "action_required": "save_word", "count_required": 5},
@@ -2884,8 +4140,12 @@ ACHIEVEMENTS = [
 
 
 @app.get("/api/achievements")
-def get_achievements() -> dict[str, Any]:
+def get_achievements(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Get list of achievements"""
+    user_id = _resolve_progress_user_id(authorization)
+    progress_snapshot = _snapshot_for_user(user_id)
     user_achievements = []
     
     for achievement in ACHIEVEMENTS:
@@ -2893,16 +4153,16 @@ def get_achievements() -> dict[str, Any]:
         
         # Check XP requirement
         if achievement["xp_required"] > 0:
-            unlocked = USER_PROGRESS["total_xp"] >= achievement["xp_required"]
+            unlocked = progress_snapshot.get("total_xp", 0) >= achievement["xp_required"]
         
         # Check action requirement
         elif achievement["action_required"]:
             if achievement["action_required"] == "save_word":
-                unlocked = len(USER_PROGRESS["saved_words"]) >= achievement["count_required"]
+                unlocked = progress_snapshot.get("saved_word_count", len(progress_snapshot.get("saved_words", []))) >= achievement["count_required"]
             elif achievement["action_required"] == "streak":
-                unlocked = USER_PROGRESS["streak_days"] >= achievement["count_required"]
-            elif achievement["action_required"] in USER_PROGRESS["module_counts"]:
-                unlocked = USER_PROGRESS["module_counts"][achievement["action_required"]] >= achievement["count_required"]
+                unlocked = progress_snapshot.get("streak_days", 0) >= achievement["count_required"]
+            elif achievement["action_required"] in progress_snapshot.get("module_counts", {}):
+                unlocked = progress_snapshot["module_counts"][achievement["action_required"]] >= achievement["count_required"]
         
         user_achievements.append({
             **achievement,
@@ -2913,23 +4173,40 @@ def get_achievements() -> dict[str, Any]:
 
 
 @app.get("/api/leaderboard")
-def get_leaderboard() -> dict[str, Any]:
-    """Get leaderboard (demo data)"""
-    # In production, this would query a database
-    demo_leaderboard = [
-        {"rank": 1, "username": "You", "xp": USER_PROGRESS["total_xp"], "streak": USER_PROGRESS["streak_days"]},
-        {"rank": 2, "username": "Alice", "xp": 1250, "streak": 12},
-        {"rank": 3, "username": "Bob", "xp": 980, "streak": 8},
-        {"rank": 4, "username": "Charlie", "xp": 750, "streak": 5},
-        {"rank": 5, "username": "Diana", "xp": 620, "streak": 3},
-    ]
-    
-    # Sort by XP
-    demo_leaderboard.sort(key=lambda x: x["xp"], reverse=True)
-    for i, entry in enumerate(demo_leaderboard):
-        entry["rank"] = i + 1
-    
-    return {"items": demo_leaderboard}
+def get_leaderboard(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
+    """Get leaderboard backed by persisted user progress."""
+    user_id = _resolve_progress_user_id(authorization)
+    if _pg_ready():
+        try:
+            rows = pg_get_leaderboard(limit=20, current_user_id=user_id)
+            if rows:
+                return {"items": rows}
+        except Exception:
+            pass
+
+    progress_snapshot = _snapshot_for_user(user_id)
+    return {
+        "items": [
+            {
+                "rank": 1,
+                "user_id": user_id,
+                "username": "ban",
+                "display_name": "Ban",
+                "level": f"Lv.{max(1, progress_snapshot.get('total_xp', 0) // 180 + 1)} - Learner",
+                "xp": progress_snapshot.get("total_xp", 0),
+                "streak": progress_snapshot.get("streak_days", 0),
+                "saved_words_count": progress_snapshot.get("saved_word_count", len(progress_snapshot.get("saved_words", []))),
+                "activities_count": progress_snapshot.get("activities_count", 0),
+                "vocab": progress_snapshot.get("vocab_score", 0),
+                "grammar": progress_snapshot.get("grammar_score", 0),
+                "consistency": progress_snapshot.get("consistency_score", 0),
+                "toeic": progress_snapshot.get("toeic_score", 0),
+                "is_current_user": True,
+            }
+        ]
+    }
 
 
 # ============================================================================
@@ -2937,12 +4214,17 @@ def get_leaderboard() -> dict[str, Any]:
 # ============================================================================
 
 @app.get("/api/stats/overview")
-def get_stats_overview() -> dict[str, Any]:
+def get_stats_overview(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+) -> dict[str, Any]:
     """Get overall statistics"""
     total_words = sum(len(s["words"]) for s in TOEIC_SETS)
     total_grammar_topics = len(GRAMMAR_TOPICS)
     total_courses = len(APTIS_COURSES)
     total_tests = len(APTIS_TESTS)
+    user_id = _resolve_progress_user_id(authorization)
+    progress_snapshot = _snapshot_for_user(user_id)
+    activity_count = progress_snapshot.get("activities_count", 0)
     
     return {
         "toeic": {
@@ -2956,10 +4238,10 @@ def get_stats_overview() -> dict[str, Any]:
             "total_lessons": sum(len(c["lessons"]) for c in APTIS_COURSES),
         },
         "user": {
-            "total_xp": USER_PROGRESS["total_xp"],
-            "streak_days": USER_PROGRESS["streak_days"],
-            "saved_words": len(USER_PROGRESS["saved_words"]),
-            "activities_count": len(USER_PROGRESS["activities"]),
+            "total_xp": progress_snapshot.get("total_xp", 0),
+            "streak_days": progress_snapshot.get("streak_days", 0),
+            "saved_words": progress_snapshot.get("saved_word_count", len(progress_snapshot.get("saved_words", []))),
+            "activities_count": activity_count,
         },
     }
 

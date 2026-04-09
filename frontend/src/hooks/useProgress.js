@@ -64,7 +64,6 @@ export function useProgress() {
       // Show toast for XP gain
       if (activityData.xp > 0) {
         toast.success(`+${activityData.xp} XP`, {
-          icon: '⭐',
           duration: 2000,
         });
       }
@@ -103,9 +102,7 @@ export function useProgress() {
           ...prev,
           savedWords: [...prev.savedWords, normalizedWord],
         }));
-        toast.success('Đã lưu từ vào bộ sưu tập', {
-          icon: '📚',
-        });
+        toast.success('Đã lưu từ vào bộ sưu tập');
       }
     } catch (error) {
       console.error('Failed to toggle saved word:', error);
